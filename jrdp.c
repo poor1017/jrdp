@@ -10,8 +10,11 @@
 
 int jrdp_srvport = -1;
 int jrdp_prvport = -1;
+int jrdp_priority = 0;
+int jrdp_sock = -1;
 static char* myhname = NULL;
 static long myhaddr = 0L;
+struct sockaddr_in jrdp_client_address_port;
 
 
 int
@@ -72,7 +75,7 @@ jrdp_hostname2name_addr( const char* hostname_arg, char** official_hnameGSP, str
 
     free(hostname);
     hostaddr->sin_port = htons(req_udp_port);
-    return 1;
+    return 0;
 }
 
 static void
@@ -116,6 +119,14 @@ myaddress(void)
     if ( !myhaddr )
         set_haddr();
     return myhaddr;
+}
+
+const char *
+myhostname(void)
+{
+    if ( !myhaddr )
+        set_haddr();
+    return myhname;
 }
 
 void
@@ -195,7 +206,7 @@ jrdp_get_nxt(void)
     int                 fromlen = sizeof(struct sockaddr_in);
     int                 n = 0;
     fd_set              readfds; /* used for select */
-    struct timeval      time_out = { -2, -2 };
+    struct timeval      time_out = { 30, 30 };
     int                 tmp;
 
 
@@ -234,3 +245,97 @@ jrdp_get_nxt(void)
 
     return NULL;
 }
+
+int
+jrdp_send( char* data, const char* dname, struct sockaddr_in* dest, int ttwait )
+{
+    int ns; // Number of bytes actually sent.
+
+    struct sockaddr_in peer;
+    memset( &peer, '\000', sizeof(struct sockaddr_in) );
+
+    if ( jrdp_init() )
+    {
+        printf( "jrdp_send init failed.\n" );
+        exit(-1);
+    }
+
+    // Assign connection ID.
+    u_int16_t cid = 13148;
+
+    if ( !dest || ( dest->sin_addr.s_addr == 0 ) )
+    {
+        if ( dname == NULL || *dname == '\0' )
+        {
+            printf( "No peer for sender.\n" );
+            exit(-1);
+        }
+
+        if ( jrdp_hostname2name_addr( dname, NULL, &peer ) )
+        {
+            printf( "Bad host name.\n" );
+            exit(-1);
+        }
+    }
+    else
+        memcpy( &peer, dest, sizeof(struct sockaddr_in) );
+
+    if ( dest && dest->sin_addr.s_addr == 0 )
+        memcpy( dest, &peer, sizeof(struct sockaddr_in) );
+
+    ns = sendto( jrdp_sock, data, 256, 0, (struct sockaddr*)&peer, sizeof(struct sockaddr_in) );
+
+    return 0;
+}
+
+int
+jrdp_init(void)
+{
+    int tmp; // For stepping through ports; also temp dummy value.
+
+    if ( jrdp_sock != -1 )
+    {
+        close(jrdp_sock);
+        jrdp_sock = -1;
+        //printf( "jrdp_init(): closing port # %d; opening new one...", ntohs(jrdp_client_address_port.sin_port) );
+        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
+    }
+
+    //ardp__set_def_port_no();
+
+    /* Open the local socket from which packets will be sent */
+    if ( (jrdp_sock = socket( AF_INET, SOCK_DGRAM, 0 ) ) < 0 )
+    {
+        printf( "jrdp: Can't open client's sending socket.\n" );
+        exit(-1);
+    }
+
+    /* Now bind the port. */
+    memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
+    jrdp_client_address_port.sin_family = AF_INET;
+    jrdp_client_address_port.sin_addr.s_addr = myaddress();
+    if ( bind( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, sizeof(struct sockaddr_in) ) )
+    {
+        printf(stderr, "ARDP: bind() completed with error: client address(port) are: %s(%d)", inet_ntoa(jrdp_client_address_port.sin_addr), ntohs(jrdp_client_address_port.sin_port) );
+        close(jrdp_sock);
+        jrdp_sock = -1;
+        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in));
+        exit(-1);
+    }
+
+    /* OK, we now have successfully bound, either to a prived or non-priv'd port. */
+    memset( &jrdp_client_address_port, 0, sizeof(struct sockaddr_in));
+    tmp = sizeof(struct sockaddr_in);
+    /* Returns 0 on success, -1 on failure. */
+    if ( getsockname( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, &tmp) )
+    {
+        printf( "JRDP: getsockname() completed with error: client address(port) are: %s(%d)", inet_ntoa(jrdp_client_address_port.sin_addr), ntohs(jrdp_client_address_port.sin_port) );
+        close(jrdp_sock);
+        jrdp_sock = -1;
+        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
+        exit(-1);
+    }
+
+    return 0;
+}
+

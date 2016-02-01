@@ -45,6 +45,12 @@ typedef  short int16_t;
 #define DEFAULT_PORT    4008
 #define PTXT_LEN_R      1405 // (CS)Max length for received data
 
+/* Queuing priorities for requests */
+#define MAX_PRI    32765  /* Maximum user proiority          */
+#define MAX_SPRI   32767  /* Maximum priority for system use */
+#define MIN_PRI    -32765  /* Maximum user proiority          */
+#define MIN_SPRI   -32768  /* Maximum priority for system use */
+
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 257
 #endif
@@ -53,9 +59,16 @@ typedef  short int16_t;
 int             jrdp_hostname2name_addr( const char* hostname_arg, char** official_hnamegsp, struct sockaddr_in* hostaddr_arg );
 static void     set_haddr(void);
 u_int32_t       myaddress(void);
+const char*     myhostname(void);
 void            jrdp_initialize(void);
+int             jrdp_init(void);
 int             jrdp_bind_port( const char* portname );
 
 char*           jrdp_get_nxt(void);
+int             jrdp_send( char* data, const char* dname, struct sockaddr_in* dest, int ttwait );
+
+
+
+extern int      jrdp_priority;
 
 #endif /* not JRDP_H_INCLUDED */

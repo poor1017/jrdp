@@ -15,6 +15,7 @@
 int
 main( int argc, char** argv )
 {
+    int i;
     int p;
     //RREQ req;
     char port[80];
@@ -33,7 +34,7 @@ main( int argc, char** argv )
 
     printf( "\nSample JRDP Server: listening on port %d\n", p );
 
-    for( unsigned i = 1; ; ++i )
+    for( i = 1; ; ++i )
     {
         char* data = jrdp_get_nxt();
         /*

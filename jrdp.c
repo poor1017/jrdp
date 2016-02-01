@@ -189,8 +189,11 @@ jrdp_bind_port( const char* portname )
 char*
 jrdp_get_nxt(void)
 {
+    char dataBuf[PTXT_LEN_R];
+
     struct sockaddr_in  from;
-    int                 fromlen;
+    int                 fromlen = sizeof(struct sockaddr_in);
+    int                 n = 0;
     fd_set              readfds; /* used for select */
     struct timeval      time_out = { -2, -2 };
     int                 tmp;
@@ -201,5 +204,33 @@ jrdp_get_nxt(void)
 
 
     tmp = select( jrdp_srvport + 1, &readfds, (fd_set *)0, (fd_set *)0, &time_out );
+
+    if ( tmp == 0 )
+    {
+        printf( "Server listen time out.\n" );
+        exit(-1);
+    }
+    else if ( tmp < 0 )
+    {
+        printf( "Server select failed.\n" );
+        exit(-1);
+    }
+    else
+    {
+        assert( FD_ISSET( jrdp_srvport, &readfds ) );
+        n = recvfrom( jrdp_srvport, dataBuf, PTXT_LEN_R, 0, (struct sockaddr *)&from, (socklen_t*)&fromlen );
+
+        if ( n <= 0 )
+        {
+            printf( "Bad rcvfrom %d.\n", n );
+            exit(-1);
+        }
+        else
+        {
+            printf( "I receive: %s\n", dataBuf );
+            exit(-1);
+        }
+    }
+
     return NULL;
 }

@@ -41,9 +41,9 @@ typedef  short int16_t;
 
 
 
-#define DEFAULT_PEER (char*) NULL
-#define DEFAULT_PORT 4008
-
+#define DEFAULT_PEER    (char*) NULL
+#define DEFAULT_PORT    4008
+#define PTXT_LEN_R      1405 // (CS)Max length for received data
 
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 257

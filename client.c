@@ -135,9 +135,10 @@ p_command_line_preparse( int* argcp, char** argv )
 
 void child_process(int num_loops)
 {
-    //RREQ req;			/* Request to be sent */
+    PJREQ req; // Request to be sent
     int length;
     int ret_val;
+    int flag = JRDP_PACK_COMPLETE;
     char mach_name[80];
     char BUFFER[256];
     int i = 0;
@@ -153,7 +154,20 @@ void child_process(int num_loops)
         sprintf( BUFFER, "This is the client #%d sending to super server msg #%d\n", (int)pid, i );
         length = strlen(BUFFER);
 
-        if ( ( ret_val = jrdp_send( BUFFER, mach_name, NULL, -1 ) ) )
+        if ( ( req = jrdp_reqalloc() ) == NULL )
+        {
+            printf( "Cannot alloc jreq.\n" );
+            exit(-1);
+        }
+
+        /* Add text in BUFFER to the request. */
+        if ( ( ret_val = jrdp_pack( req, flag, BUFFER, length ) ) )
+        {
+            printf( "Packing request failed.\n" );
+            exit(-1);
+        }
+
+        if ( ( ret_val = jrdp_send( req, mach_name, NULL, -1 ) ) )
         {
             printf( "jrdp_send, status err.\n" );
             exit(1);

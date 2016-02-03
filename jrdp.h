@@ -67,6 +67,9 @@ typedef  short int16_t;
 #define JRDP_PACK_TAGLENGTH  0x04       /* Include length tag for buffer    */
 #define JRDP_PACK_COMPLETE   0x08       /* This is the final packet to add  */
 
+#define JRDP_BACKOFF(x)     (2 * x)     /* (C)Backoff algorithm             */
+#define UFACTOR             1000000     /* convert seconds to microseconds  */
+
 #define CONCATENATE_LISTS( list1, list2 ) do    \
 {                                               \
     if ( !(list1) )                             \
@@ -232,11 +235,14 @@ int             jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* des
 int             jrdp_receive( int timeout_sec, int timeout_usec );
 int             jrdp_headers( PJREQ req );
 int             jrdp_xmit( PJREQ req, int window );
+void            jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_needed, int is_rwait_needed );
 int             jrdp_acknowledge( PJREQ req );
+int             jrdp_snd_pkt( PJPACKET pkt, PJREQ req );
 
 struct timeval  jrdp__gettimeofday(void);
 int             jrdp__eqtimeval( const struct timeval t1, const struct timeval t2 );
 int             jrdp__timeislater( struct timeval t1, struct timeval t2 );
+struct timeval  jrdp__addtimes( struct timeval t1, struct timeval t2 );
 
 extern int      jrdp_priority;
 

@@ -410,7 +410,7 @@ jrdp_headers( PJREQ req )
         int old_hlength;    /* Old header length */
         int new_hlength;    /* New header length, whatever it may be.  */
         u_int16_t ftmp;	/* Temporary for values of fields     */
-        int stamp_window_size = ( req->flags & ARDP_FLAG_SEND_MY_WINDOW_SIZE ) && ( ptmp->seq == 1 );
+        //int stamp_window_size = ( req->flags & ARDP_FLAG_SEND_MY_WINDOW_SIZE ) && ( ptmp->seq == 1 );
         //int stamp_priority = ( req->priority || ardp_priority ) && ( ptmp->seq == 1 );
         //int request_queue_status = ardp_config.client_request_queue_status && ( ptmp->seq == 1 );
         int stamp_message_npkts = (ptmp->seq == 1);
@@ -430,15 +430,15 @@ jrdp_headers( PJREQ req )
         }
 
         if ( /*request_queue_status || */stamp_message_npkts || 
-                /*stamp_priority || */stamp_window_size || req->rcvd_thru )
+                /*stamp_priority || stamp_window_size || */req->rcvd_thru )
             new_hlength = 11;
         else
             new_hlength = 9;
 
         //if ( stamp_priority )
             //new_hlength += 2;
-        if ( stamp_window_size )
-            new_hlength += 2;
+        //if ( stamp_window_size )
+            //new_hlength += 2;
         if ( stamp_message_npkts )
             new_hlength += 2;
 
@@ -447,51 +447,62 @@ jrdp_headers( PJREQ req )
         ptmp->length += new_hlength - old_hlength;
 
         /* Fill out the header */
-	    ptmp->start[0] = (char)129;
-	    //ptmp->start[1] = ptmp->context_flags; /* fix this when doing security context */
-	    ptmp->start[2] = 0; /* flags1 */
-	    if (set_ack_bit) 
-		ptmp->start[2] |= 0x01;
-	    if (stamp_message_npkts) 
-		ptmp->start[2] |= 0x04;
-	    if (stamp_priority)
-		ptmp->start[2] |= 0x08;
-	    if (stamp_window_size)
-		ptmp->start[2] |= 0x20;
-	    /* Octet 3: one option */
-	    if (request_queue_status)
-		ptmp->start[3] = (unsigned char) 253; /* no arguments */
-	    else
-		ptmp->start[3] = 0;
-	    ptmp->start[4] = (char) new_hlength;
-	    /* Connection ID (octets 5 & 6) */
-	    memcpy2(ptmp->start+5, &(req->cid));
-	    /* Sequence number (octets 7 & 8) */
-	    ftmp = htons(ptmp->seq);
-	    memcpy2(ptmp->start+7, &ftmp);        
-	    if (new_hlength > 9) {
-		char *optiondata = ptmp->start + 11; /* where options go */
-		/* Received through (octets 9 & 10) */
-		ftmp = htons(req->rcvd_thru);
-		memcpy2(ptmp->start + 9, &ftmp);  
-		if (stamp_message_npkts) {
-		    ftmp = htons(req->trns_tot);
-		    memcpy2(optiondata, &ftmp);
-		    optiondata += 2;
-		}
-		if (stamp_priority) {
-		    if(req->priority) ftmp = htons(req->priority);
-		    else ftmp = htons(ardp_priority);
-		    memcpy2(optiondata, &ftmp);
-		    optiondata += 2;
-		} 
-		if(stamp_window_size) {
-		    ftmp = htons(req->window_sz);
-		    memcpy2(optiondata, &ftmp);
-		    optiondata += 2;
-		}
-		assert(optiondata == ptmp->start + new_hlength);
-	    }
+        ptmp->start[0] = (char)129;
+        //ptmp->start[1] = ptmp->context_flags; /* fix this when doing security context */
+        ptmp->start[2] = 0; /* flags1 */
+        if ( set_ack_bit ) 
+            ptmp->start[2] |= 0x01;
+        if ( stamp_message_npkts )
+            ptmp->start[2] |= 0x04;
+        //if ( stamp_priority )
+            //ptmp->start[2] |= 0x08;
+        //if ( stamp_window_size )
+            //ptmp->start[2] |= 0x20;
+
+        /* Octet 3: one option */
+        //if ( request_queue_status)
+            //ptmp->start[3] = (unsigned char) 253; /* no arguments */
+        //else
+            ptmp->start[3] = 0;
+
+        ptmp->start[4] = (char)new_hlength;
+        /* Connection ID (octets 5 & 6) */
+        memcpy( ptmp->start + 5, &(req->cid), sizeof(char)*2 );
+        /* Sequence number (octets 7 & 8) */
+        ftmp = htons(ptmp->seq);
+        memcpy( ptmp->start + 7, &ftmp, sizeof(char)*2 );
+
+        if ( new_hlength > 9 )
+        {
+            char* optiondata = ptmp->start + 11; /* where options go */
+            /* Received through (octets 9 & 10) */
+            ftmp = htons( req->rcvd_thru );
+            memcpy( ptmp->start + 9, &ftmp, sizeof(char)*2 );
+            if ( stamp_message_npkts )
+            {
+                ftmp = htons(req->trns_tot);
+                memcpy( optiondata, &ftmp,sizeof(char)*2 );
+                optiondata += 2;
+            }
+            /*
+            if ( stamp_priority )
+            {
+                if ( req->priority )
+                    ftmp = htons(req->priority);
+                else
+                    ftmp = htons(ardp_priority);
+                memcpy( optiondata, &ftmp,sizeof(char)*2 );
+                optiondata += 2;
+            }
+            if ( stamp_window_size )
+            {
+                ftmp = htons(req->window_sz);
+                memcpy( optiondata, &ftmp, sizeof(char)*2 );
+                optiondata += 2;
+            }
+            */
+            assert( optiondata == ptmp->start + new_hlength );
+        }
     }
 
     return 0;

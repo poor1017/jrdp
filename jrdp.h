@@ -67,6 +67,22 @@ typedef  short int16_t;
 #define JRDP_PACK_TAGLENGTH  0x04       /* Include length tag for buffer    */
 #define JRDP_PACK_COMPLETE   0x08       /* This is the final packet to add  */
 
+#define CONCATENATE_LISTS( list1, list2 ) do    \
+{                                               \
+    if ( !(list1) )                             \
+        (list1) = (list2);                      \
+    else if ( !(list2) )                        \
+        ;                                       \
+    else                                        \
+    {                                           \
+        (list2)->prev->next = (list1)->prev;    \
+        (list1)->prev->next = (list2);          \
+        (list1)->prev = (list2)->prev;          \
+        (list2)->prev = (list1)->prev->next;    \
+        (list1)->prev->next = NULL;             \
+    }                                           \
+} while (0)
+
 #define APPEND_ITEM( new, head ) do \
 {                                   \
     if ( (head) )                   \
@@ -82,6 +98,29 @@ typedef  short int16_t;
         (new)->prev = (new);        \
         (new)->next = NULL;         \
     }                               \
+} while(0)
+
+#define PREPEND_ITEM( new, head ) do    \
+{                                       \
+    assert(new);                        \
+    (new)->next = NULL;                 \
+    (new)->prev = (new);                \
+    CONCATENATE_LISTS( (new), (head) ); \
+    (head) = (new);                     \
+} while(0)
+
+#define INSERT_NEW_ITEM1_AFTER_ITEM2_IN_LIST( item1, item2, list ) do   \
+{                                                                       \
+    assert(item1);                                                      \
+    assert(item2);	                                                    \
+    assert(list);                                                       \
+    (item1)->next = (item2)->next;                                      \
+    (item1)->prev = (item2);                                            \
+    if ( (item2)->next )                                                \
+        (item2)->next->prev = (item1);                                  \
+    else                                                                \
+        (list)->prev = (item1);                                         \
+    (item2)->next = (item1);                                            \
 } while(0)
 
 #define EXTRACT_ITEM( item, head ) do           \
@@ -153,6 +192,20 @@ struct jreq
     struct sockaddr_in  peer;
     char*               peer_hostname;
 
+    struct timeval      rcvd_time;	  /* (S)Time request was received      */
+    struct timeval      svc_start_time;	  /* (S)Time service began on request  */
+    struct timeval      svc_comp_time;	  /* (S)Time service was completed     */
+    struct timeval      timeout;	  /* (C)Initial time to wait for resp  */
+    struct timeval      timeout_adj;      /* (C)Adjusted time to wait for resp */
+    struct timeval      wait_till;	  /* (C)Time at which timeout expires  */
+    u_int16_t           retries;	  /* (C)Number of times to retry       */
+    u_int16_t           retries_rem;	  /* (C)Number of retries remaining    */
+    u_int16_t           svc_rwait;	  /* (C)Svc suggested tm2wait b4 retry */
+    u_int16_t           svc_rwait_seq;	  /* (C)Seq # when scv_rwait changed   */
+    /* inf_ in the following two items means 'informational' */
+    u_int16_t           inf_queue_pos;    /* (C)Service queue pos if available */
+    u_int32_t           inf_sys_time;     /* (C)Expected time til svc complete */
+
     struct jreq*        prev;
     struct jreq*        next;
 };
@@ -162,6 +215,8 @@ typedef struct jreq     JREQ;
 
 PJPACKET        jrdp_pktalloc(void);
 PJREQ           jrdp_reqalloc(void);
+void            jrdp_pktfree( PJPACKET pkt );
+void            jrdp_reqfree( PJREQ req );
 int             jrdp_pack( PJREQ req, int flags, const char* buf, int buflen );
 int             jrdp_hostname2name_addr( const char* hostname_arg, char** official_hnamegsp, struct sockaddr_in* hostaddr_arg );
 static void     set_haddr(void);
@@ -171,10 +226,17 @@ void            jrdp_initialize(void);
 int             jrdp_init(void);
 int             jrdp_bind_port( const char* portname );
 
-char*           jrdp_get_nxt(void);
+PJREQ           jrdp_get_nxt_blocking(void);
+PJREQ           jrdp_get_nxt_nonblocking(void);
 int             jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait );
+int             jrdp_receive( int timeout_sec, int timeout_usec );
 int             jrdp_headers( PJREQ req );
+int             jrdp_xmit( PJREQ req, int window );
+int             jrdp_acknowledge( PJREQ req );
 
+struct timeval  jrdp__gettimeofday(void);
+int             jrdp__eqtimeval( const struct timeval t1, const struct timeval t2 );
+int             jrdp__timeislater( struct timeval t1, struct timeval t2 );
 
 extern int      jrdp_priority;
 

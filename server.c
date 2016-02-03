@@ -12,12 +12,14 @@
 
 #define SAMPLE_DEFAULT_SERVER_PORT 4007
 
+void get_data( PJREQ req, FILE* out );
+
 int
 main( int argc, char** argv )
 {
     int i;
     int p;
-    //RREQ req;
+    PJREQ req;
     char port[80];
     int retval;
     char BUFFER[256];
@@ -36,16 +38,17 @@ main( int argc, char** argv )
 
     for( i = 1; ; ++i )
     {
-        char* data = jrdp_get_nxt();
-        /*
-        req = ardp_get_nxt();
+        req = jrdp_get_nxt_blocking();
 
-        printf("ARDP sample server: Got a request:\n"); 
+        printf( "\nJRDP sample server: Got a request:\n");
+
+
         get_data(req,stdout);  
 
         sprintf(BUFFER, "This is the sample ARDP server sending reply # %d.\n",i);
         length = strlen(BUFFER); 
 
+        /*
         if ((retval= ardp_breply(req, ARDP_R_COMPLETE, BUFFER, length)))
         {
             rfprintf(stderr,"ardp_breply() failed witherror number %d \n",
@@ -54,4 +57,23 @@ main( int argc, char** argv )
         }
         */
     }
+}
+
+void
+get_data( PJREQ req, FILE* out )
+{
+    struct jpacket* pptr;
+    int data_length = 0; // length of the payload.
+    int total_data = 0;
+
+    printf( "Retrieving data from received JRDP message:\n");
+    for ( pptr = req->rcvd; pptr; pptr = pptr->next )
+    {
+        data_length = pptr->length - ( pptr->text - pptr->start );
+        total_data += data_length;
+        /* Arguments to fwrite(): pointer, size, nitems, stream */
+        //fwrite(pptr->text, sizeof (char), data_length, out);
+        printf( "%s", pptr->text );
+    }
+    printf( "The message contained %d bytes of data (payload).\n", total_data );
 }

@@ -48,14 +48,11 @@ main( int argc, char** argv )
         sprintf(BUFFER, "This is the sample ARDP server sending reply # %d.\n",i);
         length = strlen(BUFFER); 
 
-        /*
-        if ((retval= ardp_breply(req, ARDP_R_COMPLETE, BUFFER, length)))
+        if ( ( retval = jrdp_reply( req, JRDP_R_COMPLETE, BUFFER, length ) ) )
         {
-            rfprintf(stderr,"ardp_breply() failed witherror number %d \n",
-            retval);
+            printf( "jrdp_reply() failed witherror number %d \n", retval );
             exit(1);
         }
-        */
     }
 }
 

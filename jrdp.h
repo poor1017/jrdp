@@ -59,6 +59,8 @@ typedef  short int16_t;
 #define JRDP_SUCCESS        0
 #define JRDP_ERROR          1
 #define JRDP_SELECT_FAILED  5
+#define JRDP_TIMEOUT        9
+#define JRDP_REFUSED        10
 #define JRDP_PENDING        -1
 
 #define JRDP_PKT_HDR    64      /* (CS)Max offset for start, default 64              */
@@ -72,6 +74,10 @@ typedef  short int16_t;
 #define JRDP_PACK_NOSPLITBL  0x03       /* NOSPLITB|NOSPLITL                */
 #define JRDP_PACK_TAGLENGTH  0x04       /* Include length tag for buffer    */
 #define JRDP_PACK_COMPLETE   0x08       /* This is the final packet to add  */
+
+#define JRDP_R_INCOMPLETE    0x00       /* More messages will follow        */
+#define JRDP_R_NOSEND        0x02       /* Add to req->trns but don't send  */
+#define JRDP_R_COMPLETE      0x08       /* This is the final packet to send */
 
 #define JRDP_BACKOFF(x)     (2 * x)     /* (C)Backoff algorithm             */
 #define UFACTOR             1000000     /* convert seconds to microseconds  */
@@ -118,6 +124,17 @@ typedef  short int16_t;
     (head) = (new);                     \
 } while(0)
 
+#define INSERT_ITEM1_BEFORE_ITEM2(item1, item2) do  \
+{								                    \
+     assert(item1);                                 \
+     assert(item2);                                 \
+     assert((item2)->prev->next);                   \
+     (item2)->prev->next = (item1);                 \
+     (item1)->prev = (item2)->prev;                 \
+     (item1)->next = (item2);                       \
+     (item2)->prev = (item1);                       \
+} while(0)
+
 #define INSERT_NEW_ITEM1_AFTER_ITEM2_IN_LIST( item1, item2, list ) do   \
 {                                                                       \
     assert(item1);                                                      \
@@ -149,6 +166,10 @@ typedef  short int16_t;
             (head)->prev = (item)->prev;        \
     }                                           \
 } while(0)
+
+#define if_have_option_argument(nbytes)                 \
+    if ( ctlptr + nbytes > pkt->start + hdr_len ) {}    \
+    else
 
 struct jpacket
 {
@@ -184,6 +205,8 @@ struct jreq
     u_int16_t           cid;
 
     struct jpacket*     outpkt;
+    struct jpacket*     inpkt;
+    struct jpacket*     comp_thru;
 
     u_int16_t           rcvd_tot;
     u_int16_t           rcvd_thru;
@@ -245,13 +268,19 @@ void            jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_neede
 int             jrdp_acknowledge( PJREQ req );
 int             jrdp_snd_pkt( PJPACKET pkt, PJREQ req );
 int             jrdp_retrieve( PJREQ req, int ttwait_arg );
+int             jrdp_retransmit_unacked_packets( PJREQ req );
+int             jrdp_reply( PJREQ req, int flags, const char* message, int len );
+int             jrdp_respond( PJREQ req, int flags );
 void            jrdp_update_cfields( PJREQ existing, PJREQ newing );
 
 struct timeval  jrdp__gettimeofday(void);
-int             jrdp__eqtimeval( const struct timeval t1, const struct timeval t2 );
+int             jrdp__eqtime( const struct timeval t1, const struct timeval t2 );
 int             jrdp__timeislater( struct timeval t1, struct timeval t2 );
-struct timeval  jrdp__addtimes( struct timeval t1, struct timeval t2 );
+struct timeval  jrdp__addtime( struct timeval t1, struct timeval t2 );
+struct timeval  jrdp__subtime( const struct timeval minuend, const struct timeval subtrahend );
+struct timeval  jrdp__mintime( const struct timeval t1, const struct timeval t2 );
 void            jrdp__adjust_backoff( struct timeval* tv );
+struct timeval  jrdp__next_activeQ_timeout( const struct timeval now );
 
 extern int      jrdp_priority;
 

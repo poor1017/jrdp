@@ -4,6 +4,7 @@
 
 #include <netdb.h>
 #include <sys/types.h>
+#include <sys/time.h>
 
 #if (defined(__BIT_TYPES_DEFINED__) || defined(_MACHTYPES_H_))
   /* already got them */
@@ -54,6 +55,11 @@ typedef  short int16_t;
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 257
 #endif
+
+#define JRDP_SUCCESS        0
+#define JRDP_ERROR          1
+#define JRDP_SELECT_FAILED  5
+#define JRDP_PENDING        -1
 
 #define JRDP_PKT_HDR    64      /* (CS)Max offset for start, default 64              */
 #define JRDP_PKT_LEN_S  21      /* (CS)Max length for sent data, default 1250        */
@@ -238,11 +244,14 @@ int             jrdp_xmit( PJREQ req, int window );
 void            jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_needed, int is_rwait_needed );
 int             jrdp_acknowledge( PJREQ req );
 int             jrdp_snd_pkt( PJPACKET pkt, PJREQ req );
+int             jrdp_retrieve( PJREQ req, int ttwait_arg );
+void            jrdp_update_cfields( PJREQ existing, PJREQ newing );
 
 struct timeval  jrdp__gettimeofday(void);
 int             jrdp__eqtimeval( const struct timeval t1, const struct timeval t2 );
 int             jrdp__timeislater( struct timeval t1, struct timeval t2 );
 struct timeval  jrdp__addtimes( struct timeval t1, struct timeval t2 );
+void            jrdp__adjust_backoff( struct timeval* tv );
 
 extern int      jrdp_priority;
 

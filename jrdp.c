@@ -18,10 +18,12 @@ static long myhaddr = 0L;
 struct sockaddr_in jrdp_client_address_port;
 
 PJREQ jrdp_activeQ = NULL;
+PJREQ jrdp_completeQ = NULL;
 PJREQ jrdp_pendingQ = NULL;
 PJREQ jrdp_partialQ = NULL;
 PJREQ jrdp_runQ = NULL;
 PJREQ jrdp_doneQ = NULL;
+
 int jrdp_activeQ_len = 0;
 int jrdp_pendingQ_len = 0;
 int jrdp_partialQ_len = 0;
@@ -654,9 +656,9 @@ jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait )
     //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
 
     if ( ttwait )
-        return 1;//jrdp_retrieve(req,ttwait);
+        return jrdp_retrieve( req, ttwait );
     else 
-        return 999; // This request is still pending.
+        return JRDP_PENDING;
 }
 
 int
@@ -668,13 +670,13 @@ jrdp_receive( int timeout_sec, int timeout_usec )
     PJPACKET            pkt;
     unsigned char       flags1;
     unsigned char       flags2;
-    u_int16_t           pid;    /* protocol ID for higher-level protocol. This is currently ignored after being set. */
-    int                 qpos; /* Position of new req in queue       */
-    int                 dpos; /* Position of dupe in queue          */
-    PJREQ               creq; /* Current request                    */
-    PJREQ               treq; /* Temporary request pointer          */
-    PJREQ               nreq; /* New request pointer                */
-    PJREQ               areq = NULL; /* Request needing ack        */
+    u_int16_t           pid;  /* protocol ID for higher-level protocol. This is currently ignored after being set. */
+    int                 qpos; /* Position of new req in queue */
+    int                 dpos; /* Position of dupe in queue    */
+    PJREQ               creq; /* Current request              */
+    PJREQ               treq; /* Temporary request pointer    */
+    PJREQ               nreq; /* New request pointer          */
+    PJREQ               areq = NULL; /* Request needing ack   */
     PJREQ               match_in_runQ = NULL; /* if match found in runq for completed request. */
     int                 ack_bit_set; /* ack bit set on packet we're processing? */
     char*               ctlptr;
@@ -857,7 +859,6 @@ jrdp_receive( int timeout_sec, int timeout_usec )
     /* End of block of code handling JRDP headers. */
 
 
-    /* Done queue */
     //EXTERN_MUTEXED_LOCK(jrdp_doneQ);
     for ( treq = jrdp_doneQ; treq; treq = treq->next )
     {
@@ -872,10 +873,10 @@ jrdp_receive( int timeout_sec, int timeout_usec )
 	        }
             else
             {
-                /* We did not make progress; let's cut back on the */
-                /* number of packets so we don't flood the */
-                /* client.  This is identical to the client's */
-                /* behavior; rationale documented in ardp_pr_actv.c */
+                /*
+                 * We did not make progress; let's cut back on the number of packets
+                 * so we don't flood the client. This is identical to the client's behavior;
+                 */
                 if ( treq->pwindow_sz > 4 )
                     treq->pwindow_sz /= 2;
             }
@@ -892,7 +893,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
                     if ( ( tpkt->seq <= ( nreq->prcvd_thru + nreq->pwindow_sz ) ) && ( ( tpkt->seq == 0 ) || ( tpkt->seq > nreq->prcvd_thru ) ) )
                     {
                         int ack_bit;
-                        //jrdp_header_ack_rwait( tpkt, nreq, ack_bit = ( tpkt->seq == ( nreq->prcvd_thru + nreq->pwindow_sz ) || ( pkt->seq == nreq->trns_tot && nreq->svc_rwait_seq > nreq->prcvd_thru ) ), ( nreq->svc_rwait_seq > nreq->prcvd_thru ) );
+                        jrdp_header_ack_rwait( tpkt, nreq, ack_bit = ( tpkt->seq == ( nreq->prcvd_thru + nreq->pwindow_sz ) || ( pkt->seq == nreq->trns_tot && nreq->svc_rwait_seq > nreq->prcvd_thru ) ), ( nreq->svc_rwait_seq > nreq->prcvd_thru ) );
                         if ( ack_bit )
                             printf( "Pkt %d will request an ACK", tpkt->seq );
                         jrdp_snd_pkt( tpkt, nreq );
@@ -900,10 +901,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
                 }
                 rr_time = now; /* Remember time of retransmission */
             }
-            /* Move matched request to front of queue */
-            /* nreq is definitely in jrdp_doneQ right now. */
-            /* This replaces much icky special-case code that used to be here
-               -- swa, Feb 9, 1994 */
+
             EXTRACT_ITEM( nreq, jrdp_doneQ );
             PREPEND_ITEM( nreq, jrdp_doneQ );
             assert( !creq->rcvd );
@@ -1037,7 +1035,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
                 jrdp_acknowledge(areq);
             areq = creq;
             /* XXX note that this code will blow up if the incomplete request
-            pointed to by AREQ is dropped before the ACK is sent.  This
+            pointed to by AREQ is dropped before the ACK is sent. This
             should be fixed, but won't be right now. */
         }
         printf( "Multi-packet request received (pkt %d of %d)", pkt->seq, creq->rcvd_tot );
@@ -1060,7 +1058,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
 
     /* A complete multi-packet request has been received or a single-packet
        request (always complete) has been received. */
-    /* At this point, creq refers to an RREQ structure that has either just
+    /* At this point, creq refers to an JREQ structure that has either just
        been removed from the jrdp_partialQ or was never put on a queue. */
 
     qpos = 0;
@@ -1190,20 +1188,12 @@ jrdp_receive( int timeout_sec, int timeout_usec )
     /* Fill in queue position and system time */
     nreq->inf_queue_pos = qpos;
 
-    /* Here we can perform additional processing on a newly-received ARDP
-       request.  (This includes additional processing on a newly-received
-       request that was a duplicate of a previous request.)
-       At this point, 'nreq' is a variable referring to the request that we've
-       just received.  The Prospero directory service takes advantage of this
-       to request an additional wait for heavily-loaded databases. */
-    //if ( ardp_newly_received_additional )
-        //(*ardp_newly_received_additional)(nreq);
-    /* Each time we receive a  completed request, 
-       including a duplicate of a request already on one of the queues, we tell
-       the client about our backoff.  This is how the archie servers have
-       historically done it. */ 
-    //if ( ardp_config.wait_time )
-        //ardp_rwait( nreq, ardp_config.wait_time, nreq->inf_queue_pos, nreq->inf_sys_time );
+    /*
+     * Each time we receive a completed request, including a duplicate of a request
+     * already on one of the queues, we tell the client about our backoff.
+     */
+    //if ( jrdp_config.wait_time )
+        //jrdp_rwait( nreq, jrdp_config.wait_time, nreq->inf_queue_pos, nreq->inf_sys_time );
 
     goto check_for_more;
 
@@ -1412,16 +1402,34 @@ jrdp__adjust_backoff( struct timeval* tv )
 }
 
 void
-jrdp_update_cfields( PJREQ existing, PJREQ new )
+jrdp_update_cfields( PJREQ existing, PJREQ newing )
 {
-    if ( new->prcvd_thru > existing->prcvd_thru )
-        existing->prcvd_thru = new->prcvd_thru;
+    if ( newing->prcvd_thru > existing->prcvd_thru )
+        existing->prcvd_thru = newing->prcvd_thru;
 }
 
 int
 jrdp_acknowledge( PJREQ req )
 {
-    return 0;
+    PJPACKET    pkt = jrdp_pktalloc();
+    short       cid = htons(req->cid);
+    short       rcvd = htons(req->rcvd_thru);
+    short       zero = 0;
+    int         ret;
+
+    pkt->length = 11;
+    pkt->start[0] = (char) 129; /* version # */
+    pkt->start[1] = 0;    /* no contexts here (yet) */
+    pkt->start[2] = 0x01; /* flags: please-ack bit on. */
+    pkt->start[3] = 0;    /* no options */
+    pkt->start[4] = 11;   /* header length */
+    memcpy( pkt->start + 5, &cid, sizeof(char)*2 );      /* Connection ID */
+    memcpy( pkt->start + 7, &zero, sizeof(char)*2 );     /* Packet sequence number */
+    memcpy( pkt->start + 9, &rcvd, sizeof(char)*2 );     /* Received through */
+
+    ret = jrdp_snd_pkt( pkt, req );
+    jrdp_pktfree(pkt);
+    return ret;
 }
 
 int
@@ -1429,7 +1437,7 @@ jrdp_snd_pkt( PJPACKET pkt, PJREQ req )
 {
     int n;
     printf( "Sending pkt %d.", pkt->seq );
-    n = sendto( ( ( jrdp_prvsock != -1 ) ? jrdp_prvsock : jrdp_srvsock ), pkt->start, pkt->length, 0, (struct sockaddr*)&(req->peer), addr_struct_len );
+    n = sendto( ( ( jrdp_prvsock != -1 ) ? jrdp_prvsock : jrdp_srvsock ), pkt->start, pkt->length, 0, (struct sockaddr*)&(req->peer), sizeof(struct sockaddr_in) );
     if ( n == pkt->length )
         return 0;
     printf( "Attempt to send message failed; sent %d bytes of %d", n, pkt->length );
@@ -1442,6 +1450,157 @@ jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_needed, int is_rwait_
     int new_hlength;
     int old_hlength;
     u_int16_t stmp;
-    old_hlength = tpkt->text - tpkt->start;
+    old_hlength = pkt->text - pkt->start;
 
+    /* add total # of packets to last packet (save space). */
+    int stamp_message_npkts = (pkt->seq == req->trns_tot);
+    char* ctlptr = pkt->start + 11;
+
+    if ( is_rwait_needed )
+        new_hlength = 13;   /* RWAIT flag takes a two-byte argument. */
+    else
+        new_hlength = 11;   /* include header fields through received-through */
+    if ( stamp_message_npkts )
+        new_hlength += 2;
+    /* Allocate space for new header. */
+    pkt->start = pkt->text - new_hlength;
+    pkt->length += new_hlength - old_hlength;
+
+    pkt->start[0] = (char) 129; /* version # */
+    pkt->start[1] = 0;     /* no contexts here (yet) */
+    pkt->start[2] = 0;     /* flags */
+    if ( is_ack_needed )
+        pkt->start[2] |= 0x01; /* flags: please-ack bit on. */
+    if ( stamp_message_npkts )
+        pkt->start[2] |= 0x04; /* 2 octet arg too. */
+    if ( is_rwait_needed )
+        pkt->start[2] |= 0100; /* bit 6: clear wait (2 octet arg. too) */
+    pkt->start[3] = 0;     /* no options */
+    memcpy( pkt->start + 5, &req->cid, sizeof(char)*2 ); /* Connection ID */
+    stmp = htons(pkt->seq);
+    memcpy( pkt->start + 7, &stmp, sizeof(char)*2 ); /* Packet sequence number */
+    stmp = htons(req->rcvd_thru);
+    memcpy( pkt->start + 9, &stmp, sizeof(char)*2 ); /* Received Through */
+    /* Write options */
+    ctlptr = pkt->start + 11;
+    if ( stamp_message_npkts )
+    {
+        stmp = req->trns_tot;
+        memcpy( ctlptr, &stmp, sizeof(char)*2 );
+        ctlptr += 2;
+    }
+    if ( is_rwait_needed )
+    {
+        stmp = htons(req->svc_rwait);
+        memcpy( ctlptr, &stmp, sizeof(char)*2 );
+        ctlptr += 2;
+    }
+}
+
+int
+jrdp_retrieve( PJREQ req, int ttwait_arg )
+{
+    fd_set          readfds;
+    struct timeval  selwait_st; /* Time to wait for select       */
+    int             tmp;	  /* Hold value returned by select */
+
+    struct timeval  cur_time = bogustime;
+    struct timeval  start_time = bogustime;
+    struct timeval  time_elapsed = bogustime;
+    struct timeval  ttwait = bogustime;
+
+    if ( ttwait_arg < 0 )
+        ttwait = infinitetime;
+    else
+    {
+        ttwait.tv_sec = ttwait_arg / UFACTOR;
+        ttwait.tv_usec = ttwait_arg % UFACTOR;
+    }
+    start_time = jrdp__gettimeofday();
+
+    if ( !req && !jrdp_activeQ && !jrdp_completeQ )
+    {
+        printf( "Bad request.\n" );
+        exit(-1);
+    }
+
+    if ( req && req->status == JRDP_STATUS_FREE)
+    {
+        printf( "Attempt to retrieve free JREQ. Bad request.\n");
+        exit(-1);
+    }
+
+    if ( req && req->status == JRDP_STATUS_NOSTART )
+    {
+        printf( "Another bad request.\n" );
+        exit(-1);
+    }
+
+ check_for_more:
+
+    //jrdp_process_active();
+
+    if ( !req && jrdp_completeQ )
+      return 999;//PSUCCESS;
+    if ( !req )
+      goto restart_select;
+
+    if ( ( req->status == JRDP_STATUS_COMPLETE) || ( req->status > 0 ) )
+    {
+        //EXTERN_MUTEXED_LOCK(jrdp_completeQ);
+        EXTRACT_ITEM( req, jrdp_completeQ );
+        //EXTERN_MUTEXED_UNLOCK(jrdp_completeQ);
+
+        PJPACKET ptmp;
+        if ( req->status > 0 )
+            printf( "Request failed (error %d)!", req->status );
+        else
+            printf( "Packets received...");
+        ptmp = req->rcvd;
+        while ( ptmp )
+        {
+            printf( "Packet %d%s:\n", ptmp->seq, (ptmp->seq <= 0 ? " (not rcvd, but constructed)" : "" ) );
+            //jrdp_showbuf(ptmp->start, ptmp->length, stderr);
+            printf( "\n" );
+            ptmp = ptmp->next;
+        }
+
+        if ( req->status == JRDP_STATUS_COMPLETE )
+            return 0;
+        else
+            return req->status;
+    }
+
+restart_select:
+    cur_time = jrdp__gettimeofday();
+
+    if ( jrdp__eqtimeval( ttwait, zerotime ) )
+        return JRDP_PENDING;
+    else if ( jrdp__eqtimeval( ttwait, infinitetime ) )
+        ;//selwait_st = ardp__next_activeQ_timeout(cur_time);
+    else
+    {
+        assert( !jrdp__eqtimeval( ttwait, infinitetime ) && !jrdp__eqtimeval( ttwait, zerotime ) );
+        //time_elapsed = subtract_timeval( cur_time, start_time );
+        if ( jrdp__timeislater( time_elapsed, ttwait ) )
+            return JRDP_PENDING;
+        //selwait_st = min_timeval( ardp__next_activeQ_timeout(cur_time), subtract_timeval(ttwait, time_elapsed));
+    }
+
+    printf( "Waiting %ld.%06ld seconds for reply...", selwait_st.tv_sec, selwait_st.tv_usec );
+
+    FD_ZERO(&readfds);
+    FD_SET( jrdp_sock, &readfds);
+
+    tmp = select( jrdp_sock + 1, &readfds, (fd_set *)0, (fd_set *)0, &selwait_st );
+
+    if ( tmp >= 0 )
+        goto check_for_more;
+
+    if ( ( tmp == -1 ) /*&& ( errno == EINTR )*/ )
+        goto restart_select;
+
+    printf( "select() failed.\n" );
+
+    return JRDP_SELECT_FAILED;
 }

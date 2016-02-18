@@ -251,7 +251,7 @@ void            jrdp_pktfree( PJPACKET pkt );
 void            jrdp_reqfree( PJREQ req );
 int             jrdp_pack( PJREQ req, int flags, const char* buf, int buflen );
 int             jrdp_hostname2name_addr( const char* hostname_arg, char** official_hnamegsp, struct sockaddr_in* hostaddr_arg );
-static void     set_haddr(void);
+void            set_haddr(void);
 u_int32_t       myaddress(void);
 const char*     myhostname(void);
 void            jrdp_initialize(void);
@@ -261,7 +261,7 @@ int             jrdp_bind_port( const char* portname );
 PJREQ           jrdp_get_nxt_blocking(void);
 PJREQ           jrdp_get_nxt_nonblocking(void);
 int             jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait );
-int             jrdp_receive( int timeout_sec, int timeout_usec );
+int             jrdp_accept( int timeout_sec, int timeout_usec );
 int             jrdp_headers( PJREQ req );
 int             jrdp_xmit( PJREQ req, int window );
 void            jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_needed, int is_rwait_needed );
@@ -272,6 +272,10 @@ int             jrdp_retransmit_unacked_packets( PJREQ req );
 int             jrdp_reply( PJREQ req, int flags, const char* message, int len );
 int             jrdp_respond( PJREQ req, int flags );
 void            jrdp_update_cfields( PJREQ existing, PJREQ newing );
+
+int             rudp_connect( const char* dname, struct sockaddr_in* dest );
+int             rudp_send( int flags, const char* buf, int buflen, int ttwait );
+int             rudp_disconnect();
 
 struct timeval  jrdp__gettimeofday(void);
 int             jrdp__eqtime( const struct timeval t1, const struct timeval t2 );

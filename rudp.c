@@ -3,8 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
 #include <sys/socket.h>
-#include "jrdp.h"
+#include <arpa/inet.h>
+#include "rudp.h"
 
 u_int16_t global_cid = 13148;
 int jreq_count = 0;
@@ -16,6 +18,7 @@ int jrdp_sock = -1;
 static char* myhname = NULL;
 static long myhaddr = 0L;
 struct sockaddr_in jrdp_client_address_port;
+struct sockaddr_in peer_addr;
 
 PJREQ jrdp_activeQ = NULL;
 PJREQ jrdp_completeQ = NULL;
@@ -35,7 +38,7 @@ const struct timeval zerotime = { 0, 0 };
 const struct timeval infinitetime = { -1, -1 };
 const struct timeval bogustime = { -2, -2 };
 
-int (*jrdp__receive)( int, int ) = NULL;
+int (*jrdp__accept)( int, int ) = NULL;
 
 PJPACKET
 jrdp_pktalloc()
@@ -131,7 +134,7 @@ jrdp_pack( PJREQ req, int flags, const char* buf, int buflen )
 {
     int         remaining;      /* Space remaining in pkt  */
     int         written;        /* # Octets written        */
-    char*       newline;        /* last nl in string       */
+    //char*       newline;        /* last nl in string       */
     int         deflen;         /* Length of deferred text */
     PJPACKET    pkt = NULL;     /* Current packet          */
     PJPACKET    ppkt;           /* Previous packet         */
@@ -289,14 +292,14 @@ jrdp_hostname2name_addr( const char* hostname_arg, char** official_hnameGSP, str
     return 0;
 }
 
-static void
+void
 set_haddr(void)
 {
     /* See above for explanation.  EWWWWWWW */
-    static int weird_Solaris_2_5_1_gethostname_bug_demonstrated = 0;
+    //static int weird_Solaris_2_5_1_gethostname_bug_demonstrated = 0;
 
     /* This means bugs that haven't appeared yet, but might. */
-    static int even_weirder_gethostname_bug_demonstrated = 0;
+    //static int even_weirder_gethostname_bug_demonstrated = 0;
 
     /* We use a temporary here; bug-catching. */
     int gethostname_retval;
@@ -358,7 +361,7 @@ jrdp_bind_port( const char* portname )
     int             on = 1;
     int             port_no = 0;
 
-    jrdp__receive = jrdp_receive;
+    jrdp__accept = jrdp_accept;
 
     if ( !portname || !*portname )
     {
@@ -379,11 +382,13 @@ jrdp_bind_port( const char* portname )
     {
         s_in.sin_port = sp->s_port;
     }
+    /*
     else if ( strcmp( portname, DEFAULT_PEER ) == 0 )
     {
         printf( "jrdp_bind_port: udp/%s unknown service - using %d\n", DEFAULT_PEER, DEFAULT_PORT );
         s_in.sin_port = htons( (u_int16_t) DEFAULT_PORT );
     }
+    */
     else
     {
         printf( "jrdp_bind_port: udp/%s unknown service\n", portname );
@@ -428,6 +433,12 @@ jrdp_get_nxt_blocking(void)
         if ( jrdp_prvsock != -1)
             FD_SET( jrdp_prvsock, &readfds );
         tmp = select( max( jrdp_srvsock, jrdp_prvsock ) + 1, &readfds, (fd_set*)0, (fd_set*)0, NULL );
+
+        if ( tmp < 0 )
+        {
+            printf( "jrdp: receive listening failed.\n" );
+            exit(-1);
+        }
     }
 
     return nxtreq;
@@ -436,7 +447,7 @@ jrdp_get_nxt_blocking(void)
 PJREQ
 jrdp_get_nxt_nonblocking(void)
 {
-    if ( jrdp_receive( 0, 0 ) )
+    if ( jrdp_accept( 0, 0 ) )
     {
         printf( "jrdp: receive request failed.\n" );
         exit(-1);
@@ -664,12 +675,12 @@ jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait )
 
     if ( ttwait )
         return jrdp_retrieve( req, ttwait );
-    else 
+    else
         return JRDP_PENDING;
 }
 
 int
-jrdp_receive( int timeout_sec, int timeout_usec )
+jrdp_accept( int timeout_sec, int timeout_usec )
 {
     struct sockaddr_in  from;
     int                 addr_struct_len;
@@ -677,7 +688,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
     PJPACKET            pkt;
     unsigned char       flags1;
     unsigned char       flags2;
-    u_int16_t           pid;  /* protocol ID for higher-level protocol. This is currently ignored after being set. */
+    //u_int16_t           pid;  /* protocol ID for higher-level protocol. This is currently ignored after being set. */
     int                 qpos; /* Position of new req in queue */
     int                 dpos; /* Position of dupe in queue    */
     PJREQ               creq; /* Current request              */
@@ -730,11 +741,11 @@ jrdp_receive( int timeout_sec, int timeout_usec )
     addr_struct_len = sizeof(struct sockaddr_in);
 
     if ( ( jrdp_prvsock >= 0 ) && FD_ISSET( jrdp_prvsock, &readfds ) )
-        n = recvfrom( jrdp_prvsock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, &addr_struct_len );
+        n = recvfrom( jrdp_prvsock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, (socklen_t*)&addr_struct_len );
     else
     {
         assert( FD_ISSET( jrdp_srvsock, &readfds ) );
-        n = recvfrom( jrdp_srvsock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, &addr_struct_len );
+        n = recvfrom( jrdp_srvsock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, (socklen_t*)&addr_struct_len );
     }
 
     if ( n <= 0 )
@@ -809,12 +820,14 @@ jrdp_receive( int timeout_sec, int timeout_usec )
     }
     */
     /* Bit 4: protocol id specified in a 2-octet argument */
+    /*
     if ( ( flags1 & 0x10 ) && ( ctlptr < pkt->start + hdr_len ) )
     {
         memcpy( &stmp, ctlptr, sizeof(char)*2 );
         pid = ntohs(stmp);
         ctlptr += 2;
     }
+    */
     if ( ctlptr < pkt->start + hdr_len ) // if still control info
     {
         /* Window size follows (2 octets of information). */
@@ -893,7 +906,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
             if ( ( nreq->prcvd_thru != nreq->trns_tot ) && ( !jrdp__eqtime( rr_time, now ) || ( nreq != jrdp_doneQ ) ) )
             {
                 PJPACKET tpkt; // Temporary pkt pointer
-                printf( "Transmitting reply window from %d to %d (prcvd_thru = %d of %d total response size (trns_tot))", nreq->prcvd_thru + 1, min( nreq->prcvd_thru + nreq->pwindow_sz, nreq->trns_tot ), nreq->prcvd_thru, nreq->trns_tot, 0 );
+                printf( "Transmitting reply window from %d to %d (prcvd_thru = %d of %d total response size (trns_tot))", nreq->prcvd_thru + 1, min( nreq->prcvd_thru + nreq->pwindow_sz, nreq->trns_tot ), nreq->prcvd_thru, nreq->trns_tot );
                 /* Transmit a window's worth of outstanding packets */
                 for ( tpkt = nreq->trns; tpkt; tpkt = tpkt->next )
                 {
@@ -927,7 +940,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
          * expecting an ACK. */
         if ( check_for_ack && ( treq->svc_rwait_seq > treq->prcvd_thru ) && ( treq->retries_rem > 0 ) && jrdp__timeislater( now, treq->wait_till ) )
         {
-            printf( "Requested ack not received - pinging client (%d of %d/%d ack)", treq->prcvd_thru, treq->svc_rwait_seq, treq->trns_tot, 0 );
+            printf( "Requested ack not received - pinging client (%d of %d/%d ack)", treq->prcvd_thru, treq->svc_rwait_seq, treq->trns_tot );
             /* Resend the final packet only - to wake the client  */
             if ( treq->trns )
                 jrdp_snd_pkt( treq->trns->prev, treq );
@@ -937,7 +950,7 @@ jrdp_receive( int timeout_sec, int timeout_usec )
         }
     }
     //EXTERN_MUTEXED_UNLOCK(jrdp_doneQ);
-    check_for_ack = 0; /* Only check once per call to jrdp_receive */
+    check_for_ack = 0; /* Only check once per call to jrdp_accept */
 
 
     /* If unsequenced control packet free it and check for more */
@@ -1029,7 +1042,8 @@ jrdp_receive( int timeout_sec, int timeout_usec )
                     printf( "Multi-packet request continued (rcvd %d of %d)", treq->rcvd_thru, treq->rcvd_tot );
                     goto check_for_more;
                 }
-                internal_error( "Should never get here." );
+                printf( "Should never get here." );
+                exit(-1);
             }
         }
 
@@ -1332,7 +1346,7 @@ jrdp_init(void)
     memset( &jrdp_client_address_port, 0, sizeof(struct sockaddr_in));
     tmp = sizeof(struct sockaddr_in);
     /* Returns 0 on success, -1 on failure. */
-    if ( getsockname( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, &tmp) )
+    if ( getsockname( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, (socklen_t*)&tmp) )
     {
         printf( "JRDP: getsockname() completed with error: client address(port) are: %s(%d)", inet_ntoa(jrdp_client_address_port.sin_addr), ntohs(jrdp_client_address_port.sin_port) );
         close(jrdp_sock);
@@ -1570,112 +1584,6 @@ jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_needed, int is_rwait_
 }
 
 int
-jrdp_retrieve( PJREQ req, int ttwait_arg )
-{
-    fd_set          readfds;
-    struct timeval  selwait_st; /* Time to wait for select       */
-    int             tmp; /* Hold value returned by select */
-
-    struct timeval  cur_time = bogustime;
-    struct timeval  start_time = bogustime;
-    struct timeval  time_elapsed = bogustime;
-    struct timeval  ttwait = bogustime;
-
-    if ( ttwait_arg < 0 )
-        ttwait = infinitetime;
-    else
-    {
-        ttwait.tv_sec = ttwait_arg / UFACTOR;
-        ttwait.tv_usec = ttwait_arg % UFACTOR;
-    }
-    start_time = jrdp__gettimeofday();
-
-    if ( !req && !jrdp_activeQ && !jrdp_completeQ )
-    {
-        printf( "Bad request.\n" );
-        exit(-1);
-    }
-
-    if ( req && req->status == JRDP_STATUS_FREE)
-    {
-        printf( "Attempt to retrieve free JREQ. Bad request.\n");
-        exit(-1);
-    }
-
-    if ( req && req->status == JRDP_STATUS_NOSTART )
-    {
-        printf( "Another bad request.\n" );
-        exit(-1);
-    }
-
- check_for_more:
-
-    jrdp_process_active();
-
-    if ( !req && jrdp_completeQ )
-      return 999;//PSUCCESS;
-    if ( !req )
-      goto restart_select;
-
-    if ( ( req->status == JRDP_STATUS_COMPLETE) || ( req->status > 0 ) )
-    {
-        //EXTERN_MUTEXED_LOCK(jrdp_completeQ);
-        EXTRACT_ITEM( req, jrdp_completeQ );
-        //EXTERN_MUTEXED_UNLOCK(jrdp_completeQ);
-
-        PJPACKET ptmp;
-        if ( req->status > 0 )
-            printf( "Request failed (error %d)!", req->status );
-        else
-            printf( "Packets received...");
-        ptmp = req->rcvd;
-        while ( ptmp )
-        {
-            printf( "Packet %d%s:\n", ptmp->seq, (ptmp->seq <= 0 ? " (not rcvd, but constructed)" : "" ) );
-            ptmp = ptmp->next;
-        }
-
-        if ( req->status == JRDP_STATUS_COMPLETE )
-            return 0;
-        else
-            return req->status;
-    }
-
-restart_select:
-    cur_time = jrdp__gettimeofday();
-
-    if ( jrdp__eqtime( ttwait, zerotime ) )
-        return JRDP_PENDING;
-    else if ( jrdp__eqtime( ttwait, infinitetime ) )
-        selwait_st = jrdp__next_activeQ_timeout(cur_time);
-    else
-    {
-        assert( !jrdp__eqtime( ttwait, infinitetime ) && !jrdp__eqtime( ttwait, zerotime ) );
-        time_elapsed = jrdp__subtime( cur_time, start_time );
-        if ( jrdp__timeislater( time_elapsed, ttwait ) )
-            return JRDP_PENDING;
-        selwait_st = jrdp__mintime( jrdp__next_activeQ_timeout(cur_time), jrdp__subtime( ttwait, time_elapsed ) );
-    }
-
-    printf( "Waiting %ld.%06ld seconds for reply...", selwait_st.tv_sec, selwait_st.tv_usec );
-
-    FD_ZERO(&readfds);
-    FD_SET( jrdp_sock, &readfds);
-
-    tmp = select( jrdp_sock + 1, &readfds, (fd_set*)0, (fd_set*)0, &selwait_st );
-
-    if ( tmp >= 0 )
-        goto check_for_more;
-
-    if ( ( tmp == -1 ) /*&& ( errno == EINTR )*/ )
-        goto restart_select;
-
-    printf( "select() failed.\n" );
-
-    return JRDP_SELECT_FAILED;
-}
-
-int
 jrdp_process_active()
 {
     fd_set              readfds;
@@ -1684,8 +1592,8 @@ jrdp_process_active()
     unsigned int        hdr_len; /* Header Length */
     char*               ctlptr = NULL; /* Pointer to control field. */
     u_int16_t           cid = 0;
-    unsigned char       rdflag11;
-    unsigned char       rdflag12;
+    //unsigned char       rdflag11;
+    //unsigned char       rdflag12;
     unsigned char       tchar; /* For decoding extra fields */
     u_int16_t           stmp;
     u_int32_t           ltmp;
@@ -1715,7 +1623,7 @@ check_for_pending:
     /* If either of the server ports are ready for reading, read them first */
     if ( ( select_retval != -1 ) && ( ( ( jrdp_srvsock != -1 ) && FD_ISSET( jrdp_srvsock, &readfds ) ) || ( ( jrdp_prvsock != -1 ) && FD_ISSET( jrdp_prvsock, &readfds ) ) ) )
     {
-        (*jrdp__receive)( 0, 0 );
+        (*jrdp__accept)( 0, 0 );
         goto check_for_pending;
     }
 
@@ -2160,6 +2068,112 @@ req_complete:
 }
 
 int
+jrdp_retrieve( PJREQ req, int ttwait_arg )
+{
+    fd_set          readfds;
+    struct timeval  selwait_st; /* Time to wait for select       */
+    int             tmp; /* Hold value returned by select */
+
+    struct timeval  cur_time = bogustime;
+    struct timeval  start_time = bogustime;
+    struct timeval  time_elapsed = bogustime;
+    struct timeval  ttwait = bogustime;
+
+    if ( ttwait_arg < 0 )
+        ttwait = infinitetime;
+    else
+    {
+        ttwait.tv_sec = ttwait_arg / UFACTOR;
+        ttwait.tv_usec = ttwait_arg % UFACTOR;
+    }
+    start_time = jrdp__gettimeofday();
+
+    if ( !req && !jrdp_activeQ && !jrdp_completeQ )
+    {
+        printf( "Bad request.\n" );
+        exit(-1);
+    }
+
+    if ( req && req->status == JRDP_STATUS_FREE)
+    {
+        printf( "Attempt to retrieve free JREQ. Bad request.\n");
+        exit(-1);
+    }
+
+    if ( req && req->status == JRDP_STATUS_NOSTART )
+    {
+        printf( "Another bad request.\n" );
+        exit(-1);
+    }
+
+ check_for_more:
+
+    jrdp_process_active();
+
+    if ( !req && jrdp_completeQ )
+      return 999;//PSUCCESS;
+    if ( !req )
+      goto restart_select;
+
+    if ( ( req->status == JRDP_STATUS_COMPLETE) || ( req->status > 0 ) )
+    {
+        //EXTERN_MUTEXED_LOCK(jrdp_completeQ);
+        EXTRACT_ITEM( req, jrdp_completeQ );
+        //EXTERN_MUTEXED_UNLOCK(jrdp_completeQ);
+
+        PJPACKET ptmp;
+        if ( req->status > 0 )
+            printf( "Request failed (error %d)!", req->status );
+        else
+            printf( "Packets received...");
+        ptmp = req->rcvd;
+        while ( ptmp )
+        {
+            printf( "Packet %d%s:\n", ptmp->seq, (ptmp->seq <= 0 ? " (not rcvd, but constructed)" : "" ) );
+            ptmp = ptmp->next;
+        }
+
+        if ( req->status == JRDP_STATUS_COMPLETE )
+            return 0;
+        else
+            return req->status;
+    }
+
+restart_select:
+    cur_time = jrdp__gettimeofday();
+
+    if ( jrdp__eqtime( ttwait, zerotime ) )
+        return JRDP_PENDING;
+    else if ( jrdp__eqtime( ttwait, infinitetime ) )
+        selwait_st = jrdp__next_activeQ_timeout(cur_time);
+    else
+    {
+        assert( !jrdp__eqtime( ttwait, infinitetime ) && !jrdp__eqtime( ttwait, zerotime ) );
+        time_elapsed = jrdp__subtime( cur_time, start_time );
+        if ( jrdp__timeislater( time_elapsed, ttwait ) )
+            return JRDP_PENDING;
+        selwait_st = jrdp__mintime( jrdp__next_activeQ_timeout(cur_time), jrdp__subtime( ttwait, time_elapsed ) );
+    }
+
+    printf( "Waiting %ld.%06ld seconds for reply...", selwait_st.tv_sec, selwait_st.tv_usec );
+
+    FD_ZERO(&readfds);
+    FD_SET( jrdp_sock, &readfds);
+
+    tmp = select( jrdp_sock + 1, &readfds, (fd_set*)0, (fd_set*)0, &selwait_st );
+
+    if ( tmp >= 0 )
+        goto check_for_more;
+
+    if ( ( tmp == -1 ) /*&& ( errno == EINTR )*/ )
+        goto restart_select;
+
+    printf( "select() failed.\n" );
+
+    return JRDP_SELECT_FAILED;
+}
+
+int
 jrdp_retransmit_unacked_packets( PJREQ req )
 {
     assert( req->trns_tot > 0 );
@@ -2367,4 +2381,150 @@ jrdp_respond( PJREQ req, int flags )
         }
     }
     return retval;
+}
+
+
+int
+rudp_connect( const char* dname, struct sockaddr_in* dest )
+{
+    int tmp = sizeof(struct sockaddr_in);
+
+    if ( jrdp_sock != -1 )
+    {
+        close(jrdp_sock);
+        jrdp_sock = -1;
+        //printf( "jrdp_init(): closing port # %d; opening new one...", ntohs(jrdp_client_address_port.sin_port) );
+        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
+    }
+
+    //jrdp__set_def_port_no();
+
+    /* Open the local socket from which packets will be sent */
+    if ( (jrdp_sock = socket( AF_INET, SOCK_DGRAM, 0 ) ) < 0 )
+    {
+        printf( "jrdp: Can't open client's sending socket.\n" );
+        exit(-1);
+    }
+
+    /* Now bind the port. */
+    memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
+    jrdp_client_address_port.sin_family = AF_INET;
+    jrdp_client_address_port.sin_addr.s_addr = myaddress();
+    if ( bind( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, sizeof(struct sockaddr_in) ) )
+    {
+        printf( "JRDP: bind() completed with error: client address(port) are: %s(%d)", inet_ntoa(jrdp_client_address_port.sin_addr), ntohs(jrdp_client_address_port.sin_port) );
+        close(jrdp_sock);
+        jrdp_sock = -1;
+        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in));
+        exit(-1);
+    }
+
+    /* OK, we now have successfully bound, either to a prived or non-priv'd port. */
+    memset( &jrdp_client_address_port, 0, sizeof(struct sockaddr_in));
+    /* Returns 0 on success, -1 on failure. */
+    if ( getsockname( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, (socklen_t*)&tmp) )
+    {
+        printf( "JRDP: getsockname() completed with error: client address(port) are: %s(%d)", inet_ntoa(jrdp_client_address_port.sin_addr), ntohs(jrdp_client_address_port.sin_port) );
+        close(jrdp_sock);
+        jrdp_sock = -1;
+        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
+        exit(-1);
+    }
+
+
+    if ( !dest || ( dest->sin_addr.s_addr == 0 ) )
+    {
+        if ( dname == NULL || *dname == '\0' )
+        {
+            printf( "No peer for sender.\n" );
+            exit(-1);
+        }
+
+        if ( jrdp_hostname2name_addr( dname, NULL, &peer_addr ) )
+        {
+            printf( "Bad host name.\n" );
+            exit(-1);
+        }
+    }
+    else
+        memcpy( &peer_addr, dest, sizeof(struct sockaddr_in) );
+
+    return 0;
+}
+
+int
+rudp_disconnect()
+{
+    close(jrdp_sock);
+    jrdp_sock = -1;
+
+    return 0;
+}
+
+int
+rudp_send( int flags, const char* buf, int buflen, int ttwait )
+{
+    PJREQ req;
+    if ( ( req = jrdp_reqalloc() ) == NULL )
+    {
+        printf( "Cannot alloc jreq.\n" );
+        exit(-1);
+    }
+    /* Add text in BUFFER to the request. */
+    if ( jrdp_pack( req, flags, buf, buflen ) )
+    {
+        printf( "Packing request failed.\n" );
+        exit(-1);
+    }
+
+
+    PJPACKET ptmp;
+
+    memcpy( &(req->peer), &peer_addr, sizeof(struct sockaddr_in) );
+
+    if ( req->status == JRDP_STATUS_FREE )
+    {
+        printf( "Attempt to send free request.\n" );
+        exit(-1);
+    }
+
+    while ( req->outpkt )
+    {
+        req->outpkt->seq = ++(req->trns_tot);
+        ptmp = req->outpkt;
+        EXTRACT_ITEM( ptmp, req->outpkt );
+        APPEND_ITEM( ptmp, req->trns );
+    }
+
+    /* Assign connection ID */
+    req->cid = global_cid++; // jrdp_next_cid();
+
+    if ( req->peer.sin_port == 0 )
+    {
+        printf( "No port to use.\n" );
+        exit(-1);
+    }
+
+    if ( jrdp_headers(req) )
+    {
+        printf( "Add packet head failed.\n" );
+        exit(-1);
+    }
+    req->status = JRDP_STATUS_ACTIVE;
+
+    //EXTERN_MUTEXED_LOCK(jrdp_activeQ);
+    APPEND_ITEM( req, jrdp_activeQ );
+    ++jrdp_activeQ_len;
+    req->wait_till = jrdp__addtime( jrdp__gettimeofday(), req->timeout_adj );
+    if ( jrdp_xmit( req, req->pwindow_sz ) )
+    {
+        printf( "Xmit packets failed.\n" );
+        exit(-1);
+    }
+    //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+
+    if ( ttwait )
+        return jrdp_retrieve( req, ttwait );
+    else
+        return JRDP_PENDING;
 }

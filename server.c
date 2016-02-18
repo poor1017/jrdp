@@ -1,14 +1,19 @@
-/*
- * This is a sample server program using the JRDP library.
- * 
- * This server receives and replies to requests.
+/* --------------------------------------------------
+ * @file: server.c
  *
+ * @brief: This is a sample server program using the JRDP library.
+ * This server receives and replies to requests.
  * This server runs forever; have to kill it.
+ *
+ * @version: 1.0
+ *
+ * --------------------------------------------------
  */
 
-
 #include <stdio.h>
-#include "jrdp.h" 
+#include <string.h>
+#include <stdlib.h>
+#include "rudp.h" 
 
 #define SAMPLE_DEFAULT_SERVER_PORT 4007
 
@@ -43,10 +48,10 @@ main( int argc, char** argv )
         printf( "\nJRDP sample server: Got a request:\n");
 
 
-        get_data(req,stdout);  
+        get_data(req,stdout);
 
         sprintf(BUFFER, "This is the sample ARDP server sending reply # %d.\n",i);
-        length = strlen(BUFFER); 
+        length = strlen(BUFFER);
 
         if ( ( retval = jrdp_reply( req, JRDP_R_COMPLETE, BUFFER, length ) ) )
         {

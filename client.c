@@ -8,9 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
-#include "jrdp.h"
+#include "rudp.h"
 
 #define SAMPLE_DEFAULT_SUPER_SERVER_HOST (myhostname())
 #define SAMPLE_DEFAULT_SERVER_PORT 4007
@@ -135,7 +137,6 @@ p_command_line_preparse( int* argcp, char** argv )
 
 void child_process(int num_loops)
 {
-    PJREQ req; // Request to be sent
     int length;
     int ret_val;
     int flag = JRDP_PACK_COMPLETE;
@@ -143,9 +144,11 @@ void child_process(int num_loops)
     char BUFFER[256];
     int i = 0;
     pid_t pid;
-    void *dummy;
+    //void *dummy;
 
     sprintf( mach_name, "%s(%d)", SAMPLE_DEFAULT_SUPER_SERVER_HOST, SAMPLE_DEFAULT_SERVER_PORT );
+
+    rudp_connect( mach_name, NULL );
 
     /* Loop N times */
     pid = getpid();
@@ -154,23 +157,12 @@ void child_process(int num_loops)
         sprintf( BUFFER, "This is the client #%d sending to super server msg #%d\n", (int)pid, i );
         length = strlen(BUFFER);
 
-        if ( ( req = jrdp_reqalloc() ) == NULL )
-        {
-            printf( "Cannot alloc jreq.\n" );
-            exit(-1);
-        }
-
-        /* Add text in BUFFER to the request. */
-        if ( ( ret_val = jrdp_pack( req, flag, BUFFER, length ) ) )
-        {
-            printf( "Packing request failed.\n" );
-            exit(-1);
-        }
-
-        if ( ( ret_val = jrdp_send( req, mach_name, NULL, -1 ) ) )
+        if ( ( ret_val = rudp_send( flag, BUFFER, length, -1 ) ) )
         {
             printf( "jrdp_send, status err.\n" );
             exit(1);
         }
     }
+
+    rudp_disconnect();
 }

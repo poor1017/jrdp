@@ -244,9 +244,37 @@ struct jreq
 typedef struct jreq*    PJREQ;
 typedef struct jreq     JREQ;
 
+struct jlistener
+{
+    int     sock;
+    int     prvsock;
+    int     port;
 
+    int     req_count;
+    int     pkt_count;
+
+    int     activeQ_len;
+    int     pendingQ_len;
+    int     partialQ_len;
+    int     partialQ_max_len;
+    int     replyQ_len;
+    int     replyQ_max_len;
+
+    PJREQ   pendingQ;
+    PJREQ   partialQ;
+    PJREQ   runQ;
+    PJREQ   doneQ;
+
+    struct jlistener* prev;
+    struct jlistener* next;
+};
+typedef struct jlistener*   PJLISTENER;
+typedef struct jlistener    JLISTENER;
+
+PJLISTENER      rudp_lstneralloc(void);
 PJPACKET        jrdp_pktalloc(void);
 PJREQ           jrdp_reqalloc(void);
+void            rudp_lstnerfree( PJLISTENER lstner );
 void            jrdp_pktfree( PJPACKET pkt );
 void            jrdp_reqfree( PJREQ req );
 int             jrdp_pack( PJREQ req, int flags, const char* buf, int buflen );
@@ -256,26 +284,28 @@ u_int32_t       myaddress(void);
 const char*     myhostname(void);
 void            jrdp_initialize(void);
 int             jrdp_init(void);
-int             jrdp_bind_port( const char* portname );
+//int             jrdp_bind_port( const char* portname );
 
-PJREQ           jrdp_get_nxt_blocking(void);
-PJREQ           jrdp_get_nxt_nonblocking(void);
+PJREQ           jrdp_get_nxt_blocking( PJLISTENER lstner );
+PJREQ           jrdp_get_nxt_nonblocking( PJLISTENER lstner );
 int             jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait );
-int             jrdp_accept( int timeout_sec, int timeout_usec );
+int             jrdp_accept( PJLISTENER lstner, int timeout_sec, int timeout_usec );
 int             jrdp_headers( PJREQ req );
 int             jrdp_xmit( PJREQ req, int window );
 void            jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_needed, int is_rwait_needed );
-int             jrdp_acknowledge( PJREQ req );
-int             jrdp_snd_pkt( PJPACKET pkt, PJREQ req );
+int             jrdp_acknowledge( PJLISTENER lstner, PJREQ req );
+int             jrdp_snd_pkt( PJLISTENER lstner, PJPACKET pkt, PJREQ req );
 int             jrdp_retrieve( PJREQ req, int ttwait_arg );
 int             jrdp_retransmit_unacked_packets( PJREQ req );
-int             jrdp_reply( PJREQ req, int flags, const char* message, int len );
-int             jrdp_respond( PJREQ req, int flags );
+int             jrdp_reply( PJLISTENER lstner, PJREQ req, int flags, const char* message, int len );
+int             jrdp_respond( PJLISTENER lstner, PJREQ req, int flags );
 void            jrdp_update_cfields( PJREQ existing, PJREQ newing );
 
+PJLISTENER      rudp_open_listen( const char* portname );
 int             rudp_connect( const char* dname, struct sockaddr_in* dest );
 int             rudp_send( int flags, const char* buf, int buflen, int ttwait );
 int             rudp_disconnect();
+int             rudp_close_listen( PJLISTENER lstner );
 
 struct timeval  jrdp__gettimeofday(void);
 int             jrdp__eqtime( const struct timeval t1, const struct timeval t2 );

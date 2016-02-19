@@ -25,6 +25,7 @@ main( int argc, char** argv )
     int i;
     int p;
     PJREQ req;
+    PJLISTENER lstner;
     char port[80];
     int retval;
     char BUFFER[256];
@@ -37,13 +38,16 @@ main( int argc, char** argv )
 
     sprintf( port, "#%d", SAMPLE_DEFAULT_SERVER_PORT );
 
-    p = jrdp_bind_port(port);
+    lstner = rudp_open_listen(port);
 
-    printf( "\nSample JRDP Server: listening on port %d\n", p );
+    if ( lstner )
+        printf( "\nSample JRDP Server: listening on port %d\n", lstner->port );
+    else
+        exit(-1);
 
     for( i = 1; ; ++i )
     {
-        req = jrdp_get_nxt_blocking();
+        req = jrdp_get_nxt_blocking(lstner);
 
         printf( "\nJRDP sample server: Got a request:\n");
 
@@ -53,12 +57,14 @@ main( int argc, char** argv )
         sprintf(BUFFER, "This is the sample ARDP server sending reply # %d.\n",i);
         length = strlen(BUFFER);
 
-        if ( ( retval = jrdp_reply( req, JRDP_R_COMPLETE, BUFFER, length ) ) )
+        if ( ( retval = jrdp_reply( lstner, req, JRDP_R_COMPLETE, BUFFER, length ) ) )
         {
             printf( "jrdp_reply() failed witherror number %d \n", retval );
             exit(1);
         }
     }
+
+    rudp_close_listen(lstner);
 }
 
 void

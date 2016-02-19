@@ -9,10 +9,11 @@
 #include "rudp.h"
 
 u_int16_t global_cid = 13148;
+int rudp_jlstner_count = 0;
 int jreq_count = 0;
 int jpkt_count = 0;
-int jrdp_srvsock = -1;
-int jrdp_prvsock = -1;
+//int jrdp_srvsock = -1;
+//int jrdp_prvsock = -1;
 int jrdp_priority = 0;
 int jrdp_sock = -1;
 static char* myhname = NULL;
@@ -22,23 +23,23 @@ struct sockaddr_in peer_addr;
 
 PJREQ jrdp_activeQ = NULL;
 PJREQ jrdp_completeQ = NULL;
-PJREQ jrdp_pendingQ = NULL;
-PJREQ jrdp_partialQ = NULL;
-PJREQ jrdp_runQ = NULL;
-PJREQ jrdp_doneQ = NULL;
+//PJREQ jrdp_pendingQ = NULL;
+//PJREQ jrdp_partialQ = NULL;
+//PJREQ jrdp_runQ = NULL;
+//PJREQ jrdp_doneQ = NULL;
 
 int jrdp_activeQ_len = 0;
-int jrdp_pendingQ_len = 0;
-int jrdp_partialQ_len = 0;
-int jrdp_partialQ_max_len = 20;
-int jrdp_replyQ_len = 0;
-int jrdp_replyQ_max_len = 20;
+//int jrdp_pendingQ_len = 0;
+//int jrdp_partialQ_len = 0;
+//int jrdp_partialQ_max_len = 20;
+//int jrdp_replyQ_len = 0;
+//int jrdp_replyQ_max_len = 20;
 
 const struct timeval zerotime = { 0, 0 };
 const struct timeval infinitetime = { -1, -1 };
 const struct timeval bogustime = { -2, -2 };
 
-int (*jrdp__accept)( int, int ) = NULL;
+int (*jrdp__accept)( PJLISTENER, int, int ) = NULL;
 
 PJPACKET
 jrdp_pktalloc()
@@ -351,6 +352,7 @@ jrdp_initialize(void)
     return;
 }
 
+/*
 int
 jrdp_bind_port( const char* portname )
 {
@@ -382,13 +384,11 @@ jrdp_bind_port( const char* portname )
     {
         s_in.sin_port = sp->s_port;
     }
-    /*
     else if ( strcmp( portname, DEFAULT_PEER ) == 0 )
     {
         printf( "jrdp_bind_port: udp/%s unknown service - using %d\n", DEFAULT_PEER, DEFAULT_PORT );
         s_in.sin_port = htons( (u_int16_t) DEFAULT_PORT );
     }
-    */
     else
     {
         printf( "jrdp_bind_port: udp/%s unknown service\n", portname );
@@ -414,9 +414,10 @@ jrdp_bind_port( const char* portname )
 
     return ( ntohs(s_in.sin_port) );
 }
+*/
 
 PJREQ
-jrdp_get_nxt_blocking(void)
+jrdp_get_nxt_blocking( PJLISTENER lstner )
 {
     PJREQ   nxtreq = NULL;
     fd_set  readfds;
@@ -424,15 +425,15 @@ jrdp_get_nxt_blocking(void)
 
     while ( 1 )
     {
-        if ( ( nxtreq = jrdp_get_nxt_nonblocking() ) )
+        if ( ( nxtreq = jrdp_get_nxt_nonblocking(lstner) ) )
             break;
 
         FD_ZERO(&readfds);
-        if ( jrdp_srvsock != -1 )
-            FD_SET( jrdp_srvsock, &readfds );
-        if ( jrdp_prvsock != -1)
-            FD_SET( jrdp_prvsock, &readfds );
-        tmp = select( max( jrdp_srvsock, jrdp_prvsock ) + 1, &readfds, (fd_set*)0, (fd_set*)0, NULL );
+        if ( lstner->sock != -1 )
+            FD_SET( lstner->sock, &readfds );
+        if ( lstner->prvsock != -1)
+            FD_SET( lstner->prvsock, &readfds );
+        tmp = select( max( lstner->sock, lstner->prvsock ) + 1, &readfds, (fd_set*)0, (fd_set*)0, NULL );
 
         if ( tmp < 0 )
         {
@@ -445,34 +446,34 @@ jrdp_get_nxt_blocking(void)
 }
 
 PJREQ
-jrdp_get_nxt_nonblocking(void)
+jrdp_get_nxt_nonblocking( PJLISTENER lstner )
 {
-    if ( jrdp_accept( 0, 0 ) )
+    if ( jrdp_accept( lstner, 0, 0 ) )
     {
         printf( "jrdp: receive request failed.\n" );
         exit(-1);
     }
 
-    if ( jrdp_pendingQ )
+    if ( lstner->pendingQ )
     {
-        //EXTERN_MUTEXED_LOCK(jrdp_pendingQ);
-        if ( jrdp_pendingQ )
+        //EXTERN_MUTEXED_LOCK(lstner->pendingQ);
+        if ( lstner->pendingQ )
         {
-            PJREQ nxtreq = jrdp_pendingQ;
+            PJREQ nxtreq = lstner->pendingQ;
 
-            EXTRACT_ITEM( nxtreq, jrdp_pendingQ );
-            --jrdp_pendingQ_len;
+            EXTRACT_ITEM( nxtreq, lstner->pendingQ );
+            --lstner->pendingQ_len;
             //if ( nxtreq->priority > 0 ) jrdp_priorityQ_len--;
-            //EXTERN_MUTEXED_UNLOCK(jrdp_pendingQ);
+            //EXTERN_MUTEXED_UNLOCK(lstner->pendingQ);
 
             //nxtreq->svc_start_time = jrdp__gettimeofday();
-            //EXTERN_MUTEXED_LOCK(jrdp_runQ);
-            APPEND_ITEM( nxtreq, jrdp_runQ );
-            //EXTERN_MUTEXED_UNLOCK(jrdp_runQ);
+            //EXTERN_MUTEXED_LOCK(lstner->runQ);
+            APPEND_ITEM( nxtreq, lstner->runQ );
+            //EXTERN_MUTEXED_UNLOCK(lstner->runQ);
 
             return nxtreq;
         }
-        //EXTERN_MUTEXED_UNLOCK(jrdp_pendingQ);
+        //EXTERN_MUTEXED_UNLOCK(lstner->pendingQ);
     }
 
     return NULL;
@@ -680,7 +681,7 @@ jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait )
 }
 
 int
-jrdp_accept( int timeout_sec, int timeout_usec )
+jrdp_accept( PJLISTENER lstner, int timeout_sec, int timeout_usec )
 {
     struct sockaddr_in  from;
     int                 addr_struct_len;
@@ -695,7 +696,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     PJREQ               treq; /* Temporary request pointer    */
     PJREQ               nreq; /* New request pointer          */
     PJREQ               areq = NULL; /* Request needing ack   */
-    PJREQ               match_in_runQ = NULL; /* if match found in runq for completed request. */
+    PJREQ               match_in_runQ = NULL; /* if match found in runQ for completed request. */
     int                 ack_bit_set; /* ack bit set on packet we're processing? */
     char*               ctlptr;
     u_int16_t           stmp;
@@ -706,7 +707,6 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     struct timeval      rr_time = zerotime; /* Time last retrans from done queue */
     struct timeval      time_out = bogustime;
 
-
  check_for_more:
 
     time_out.tv_sec = timeout_sec;
@@ -714,17 +714,17 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     now = jrdp__gettimeofday();
 
     FD_ZERO( &readfds );
-    FD_SET( jrdp_srvsock, &readfds );
-    if ( jrdp_prvsock != -1 )
-        FD_SET( jrdp_prvsock, &readfds );
+    FD_SET( lstner->sock, &readfds );
+    if ( lstner->prvsock != -1 )
+        FD_SET( lstner->prvsock, &readfds );
 
-    tmp = select( max( jrdp_srvsock, jrdp_prvsock ) + 1, &readfds, (fd_set*)0, (fd_set*)0, &time_out );
+    tmp = select( max( lstner->sock, lstner->prvsock ) + 1, &readfds, (fd_set*)0, (fd_set*)0, &time_out );
 
     if ( tmp == 0 )
     {
         if ( areq )
         {
-            jrdp_acknowledge(areq);
+            jrdp_acknowledge( lstner, areq );
             areq = NULL;
         }
         return 0;
@@ -740,12 +740,12 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     pkt = jrdp_pktalloc();
     addr_struct_len = sizeof(struct sockaddr_in);
 
-    if ( ( jrdp_prvsock >= 0 ) && FD_ISSET( jrdp_prvsock, &readfds ) )
-        n = recvfrom( jrdp_prvsock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, (socklen_t*)&addr_struct_len );
+    if ( ( lstner->prvsock >= 0 ) && FD_ISSET( lstner->prvsock, &readfds ) )
+        n = recvfrom( lstner->prvsock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, (socklen_t*)&addr_struct_len );
     else
     {
-        assert( FD_ISSET( jrdp_srvsock, &readfds ) );
-        n = recvfrom( jrdp_srvsock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, (socklen_t*)&addr_struct_len );
+        assert( FD_ISSET( lstner->sock, &readfds ) );
+        n = recvfrom( lstner->sock, pkt->data, JRDP_PKT_LEN_R, 0, (struct sockaddr*)&from, (socklen_t*)&addr_struct_len );
     }
 
     if ( n <= 0 )
@@ -879,8 +879,8 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     /* End of block of code handling JRDP headers. */
 
 
-    //EXTERN_MUTEXED_LOCK(jrdp_doneQ);
-    for ( treq = jrdp_doneQ; treq; treq = treq->next )
+    //EXTERN_MUTEXED_LOCK(lstner->doneQ);
+    for ( treq = lstner->doneQ; treq; treq = treq->next )
     {
         if ( ( treq->cid == creq->cid ) && ( memcmp( (char*)&(treq->peer), (char *)&from, sizeof(from) ) == 0 ) )
         {
@@ -903,7 +903,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
             nreq = treq;
 
             /* Retransmit reply if not completely received and if we didn't retransmit it this second  */
-            if ( ( nreq->prcvd_thru != nreq->trns_tot ) && ( !jrdp__eqtime( rr_time, now ) || ( nreq != jrdp_doneQ ) ) )
+            if ( ( nreq->prcvd_thru != nreq->trns_tot ) && ( !jrdp__eqtime( rr_time, now ) || ( nreq != lstner->doneQ ) ) )
             {
                 PJPACKET tpkt; // Temporary pkt pointer
                 printf( "Transmitting reply window from %d to %d (prcvd_thru = %d of %d total response size (trns_tot))", nreq->prcvd_thru + 1, min( nreq->prcvd_thru + nreq->pwindow_sz, nreq->trns_tot ), nreq->prcvd_thru, nreq->trns_tot );
@@ -916,18 +916,18 @@ jrdp_accept( int timeout_sec, int timeout_usec )
                         jrdp_header_ack_rwait( tpkt, nreq, ack_bit = ( tpkt->seq == ( nreq->prcvd_thru + nreq->pwindow_sz ) || ( pkt->seq == nreq->trns_tot && nreq->svc_rwait_seq > nreq->prcvd_thru ) ), ( nreq->svc_rwait_seq > nreq->prcvd_thru ) );
                         if ( ack_bit )
                             printf( "Pkt %d will request an ACK", tpkt->seq );
-                        jrdp_snd_pkt( tpkt, nreq );
+                        jrdp_snd_pkt( lstner, tpkt, nreq );
                     }
                 }
                 rr_time = now; /* Remember time of retransmission */
             }
 
-            EXTRACT_ITEM( nreq, jrdp_doneQ );
-            PREPEND_ITEM( nreq, jrdp_doneQ );
+            EXTRACT_ITEM( nreq, lstner->doneQ );
+            PREPEND_ITEM( nreq, lstner->doneQ );
             assert( !creq->rcvd );
             jrdp_reqfree(creq);
             jrdp_pktfree(pkt);
-            //EXTERN_MUTEXED_UNLOCK(jrdp_doneQ);
+            //EXTERN_MUTEXED_UNLOCK(lstner->doneQ);
             goto check_for_more;
         }
 
@@ -943,13 +943,13 @@ jrdp_accept( int timeout_sec, int timeout_usec )
             printf( "Requested ack not received - pinging client (%d of %d/%d ack)", treq->prcvd_thru, treq->svc_rwait_seq, treq->trns_tot );
             /* Resend the final packet only - to wake the client  */
             if ( treq->trns )
-                jrdp_snd_pkt( treq->trns->prev, treq );
+                jrdp_snd_pkt( lstner, treq->trns->prev, treq );
             jrdp__adjust_backoff( &(treq->timeout_adj) );
             treq->wait_till = jrdp__addtime( treq->timeout_adj, now );
             treq->retries_rem--;
         }
     }
-    //EXTERN_MUTEXED_UNLOCK(jrdp_doneQ);
+    //EXTERN_MUTEXED_UNLOCK(lstner->doneQ);
     check_for_ack = 0; /* Only check once per call to jrdp_accept */
 
 
@@ -966,7 +966,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     if ( creq->rcvd_tot != 1 )
     {
         /* Look for rest of request */
-        for ( treq = jrdp_partialQ; treq; treq = treq->next)
+        for ( treq = lstner->partialQ; treq; treq = treq->next)
         {
             if ( ( treq->cid != 0 ) && ( treq->cid == creq->cid ) && ( memcmp( (char*)&(treq->peer), (char*)&from, addr_struct_len ) == 0 ) )
             {
@@ -989,7 +989,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
                         if ( ack_bit_set && areq != treq )
                         {
                             if ( areq )
-                                jrdp_acknowledge(areq);
+                                jrdp_acknowledge( lstner, areq );
                             areq = treq;
                         }
                         jrdp_pktfree(pkt);
@@ -1026,8 +1026,8 @@ jrdp_accept( int timeout_sec, int timeout_usec )
                     if ( areq == treq )
                         areq = NULL;
                     creq = treq;
-                    EXTRACT_ITEM( creq, jrdp_partialQ );
-                    --jrdp_partialQ_len;
+                    EXTRACT_ITEM( creq, lstner->partialQ );
+                    --lstner->partialQ_len;
                     printf( "Multi-packet request complete" );
                     goto req_complete;
                 }
@@ -1036,7 +1036,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
                     if ( ack_bit_set && areq != treq )
                     {
                         if ( areq )
-                            jrdp_acknowledge(areq);
+                            jrdp_acknowledge( lstner, areq );
                         areq = treq;
                     }
                     printf( "Multi-packet request continued (rcvd %d of %d)", treq->rcvd_thru, treq->rcvd_tot );
@@ -1053,7 +1053,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
         if ( ack_bit_set && areq != creq )
         {
             if ( areq )
-                jrdp_acknowledge(areq);
+                jrdp_acknowledge( lstner, areq );
             areq = creq;
             /* XXX note that this code will blow up if the incomplete request
             pointed to by AREQ is dropped before the ACK is sent. This
@@ -1061,12 +1061,12 @@ jrdp_accept( int timeout_sec, int timeout_usec )
         }
         printf( "Multi-packet request received (pkt %d of %d)", pkt->seq, creq->rcvd_tot );
         APPEND_ITEM( pkt, creq->rcvd );
-        APPEND_ITEM( creq, jrdp_partialQ );
-        if ( ++jrdp_partialQ_len > jrdp_partialQ_max_len )
+        APPEND_ITEM( creq, lstner->partialQ );
+        if ( ++lstner->partialQ_len > lstner->partialQ_max_len )
         {
-            treq = jrdp_partialQ;
-            EXTRACT_ITEM( treq, jrdp_partialQ );
-            jrdp_partialQ_len--;
+            treq = lstner->partialQ;
+            EXTRACT_ITEM( treq, lstner->partialQ );
+            lstner->partialQ_len--;
             printf( "Too many incomplete requests - dropped (rthru %d of %d)", treq->rcvd_thru, treq->rcvd_tot );
             jrdp_reqfree(treq);
         }
@@ -1080,7 +1080,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     /* A complete multi-packet request has been received or a single-packet
        request (always complete) has been received. */
     /* At this point, creq refers to an JREQ structure that has either just
-       been removed from the jrdp_partialQ or was never put on a queue. */
+       been removed from the lstner->partialQ or was never put on a queue. */
 
     qpos = 0;
     dpos = 1;
@@ -1103,8 +1103,8 @@ jrdp_accept( int timeout_sec, int timeout_usec )
      */
 
     /* First search for a match in the runQ (a match that is being run) */
-    //EXTERN_MUTEXED_LOCK(jrdp_runQ);
-    for ( match_in_runQ = jrdp_runQ; match_in_runQ; match_in_runQ = match_in_runQ->next )
+    //EXTERN_MUTEXED_LOCK(lstner->runQ);
+    for ( match_in_runQ = lstner->runQ; match_in_runQ; match_in_runQ = match_in_runQ->next )
     {
         if ( ( match_in_runQ->cid == nreq->cid ) && ( memcmp( (char*)&(match_in_runQ->peer), (char*)&(nreq->peer), addr_struct_len ) == 0 ) )
         {
@@ -1116,7 +1116,7 @@ jrdp_accept( int timeout_sec, int timeout_usec )
             break; /* leave match_in_runQ set to nreq  */
         }
     }
-    //EXTERN_MUTEXED_UNLOCK(jrdp_runQ);
+    //EXTERN_MUTEXED_UNLOCK(lstner->runQ);
 
     /* XXX this code could be simplified and improved -- STeve & Katia, 9/26/96 */
     if ( match_in_runQ )
@@ -1125,17 +1125,17 @@ jrdp_accept( int timeout_sec, int timeout_usec )
     }
     else
     {
-        //EXTERN_MUTEXED_LOCK(jrdp_pendingQ);
-        if ( jrdp_pendingQ )
+        //EXTERN_MUTEXED_LOCK(lstner->pendingQ);
+        if ( lstner->pendingQ )
         {
             int keep_looking = 1; /* Keep looking for dup. Initially say to keep on looking. */
-            for ( treq = jrdp_pendingQ; treq; )
+            for ( treq = lstner->pendingQ; treq; )
             {
                 if ( ( treq->cid == nreq->cid ) && ( memcmp( (char*)&(treq->peer), (char*)&(nreq->peer), addr_struct_len ) == 0 ) )
                 {
                     /* Request is already on queue */
                     jrdp_update_cfields( treq, nreq );
-                    printf( "Duplicate discarded (%d of %d)", dpos, jrdp_pendingQ_len );
+                    printf( "Duplicate discarded (%d of %d)", dpos, lstner->pendingQ_len );
                     jrdp_reqfree(nreq);
                     nreq = treq;
                     keep_looking = 0; /* We found the duplicate */
@@ -1144,10 +1144,10 @@ jrdp_accept( int timeout_sec, int timeout_usec )
                 /*
                 if ( ( jrdp_pri_override && jrdp_pri_func && ( jrdp_pri_func( nreq, treq ) < 0 ) ) || ( !jrdp_pri_override && ( ( nreq->priority < treq->priority ) || ( ( treq->priority == nreq->priority ) && jrdp_pri_func && ( jrdp_pri_func( nreq, treq ) < 0 ) ) ) ) )
                 {
-                    INSERT_NEW_ITEM1_BEFORE_ITEM2_IN_LIST( nreq, treq, jrdp_pendingQ );
-                    jrdp_pendingQ_len++;
+                    INSERT_NEW_ITEM1_BEFORE_ITEM2_IN_LIST( nreq, treq, lstner->pendingQ );
+                    lstner->pendingQ_len++;
                     if ( nreq->priority > 0 )
-                        jrdp_priorityQ_len++;
+                        lstner->priorityQ_len++;
                     LOG_PACKET(nreq, dpos);
                     qpos = dpos;
                     keep_looking = 1;  // There may still be a duplicate
@@ -1156,10 +1156,10 @@ jrdp_accept( int timeout_sec, int timeout_usec )
                 */
                 if ( !treq->next )
                 {
-                    APPEND_ITEM( nreq, jrdp_pendingQ );
-                    jrdp_pendingQ_len++;
+                    APPEND_ITEM( nreq, lstner->pendingQ );
+                    lstner->pendingQ_len++;
                     //if ( nreq->priority > 0 )
-                        //jrdp_priorityQ_len++;
+                        //lstner->priorityQ_len++;
                     //LOG_PACKET( nreq, dpos + 1 );
                     qpos = dpos + 1;
                     keep_looking = 0; // Nothing more to check
@@ -1180,10 +1180,10 @@ jrdp_accept( int timeout_sec, int timeout_usec )
                     {
                         /* Found a dup */
                         printf( "Duplicate replaced (removed at %d)", dpos );
-                        jrdp_pendingQ_len--;
+                        lstner->pendingQ_len--;
                         //if ( treq->priority > 0 )
-                            //jrdp_priorityQ_len--;
-                        EXTRACT_ITEM( treq, jrdp_pendingQ );
+                            //lstner->priorityQ_len--;
+                        EXTRACT_ITEM( treq, lstner->pendingQ );
                         jrdp_reqfree(treq);
                         break;
                     }
@@ -1195,15 +1195,15 @@ jrdp_accept( int timeout_sec, int timeout_usec )
         else
         {
             nreq->next = NULL;
-            jrdp_pendingQ = nreq;
-            jrdp_pendingQ->prev = nreq;
-            jrdp_pendingQ_len++;
+            lstner->pendingQ = nreq;
+            lstner->pendingQ->prev = nreq;
+            lstner->pendingQ_len++;
             //if ( nreq->priority > 0 )
-                //jrdp_priorityQ_len++;
+                //lstner->priorityQ_len++;
             //LOG_PACKET(nreq, dpos);
             qpos = dpos;
         }
-        //EXTERN_MUTEXED_UNLOCK(jrdp_pendingQ);
+        //EXTERN_MUTEXED_UNLOCK(lstner->pendingQ);
     }
 
     /* Fill in queue position and system time */
@@ -1282,7 +1282,8 @@ jrdp_xmit( PJREQ req, int window )
             }
             printf( "...");
 
-            ns = sendto( jrdp_sock,(char*)(ptmp->start), ptmp->length, 0, (struct sockaddr*)&(req->peer), sizeof(struct sockaddr_in) );
+            //ns = sendto( jrdp_sock,(char*)(ptmp->start), ptmp->length, 0, (struct sockaddr*)&(req->peer), sizeof(struct sockaddr_in) );
+            ns = send( jrdp_sock, (char*)(ptmp->start), ptmp->length, MSG_NOSIGNAL );
 
             if ( ns != ptmp->length )
             {
@@ -1495,7 +1496,7 @@ jrdp_update_cfields( PJREQ existing, PJREQ newing )
 }
 
 int
-jrdp_acknowledge( PJREQ req )
+jrdp_acknowledge( PJLISTENER lstner, PJREQ req )
 {
     PJPACKET    pkt = jrdp_pktalloc();
     short       cid = htons(req->cid);
@@ -1513,17 +1514,17 @@ jrdp_acknowledge( PJREQ req )
     memcpy( pkt->start + 7, &zero, sizeof(char)*2 );     /* Packet sequence number */
     memcpy( pkt->start + 9, &rcvd, sizeof(char)*2 );     /* Received through */
 
-    ret = jrdp_snd_pkt( pkt, req );
+    ret = jrdp_snd_pkt( lstner, pkt, req );
     jrdp_pktfree(pkt);
     return ret;
 }
 
 int
-jrdp_snd_pkt( PJPACKET pkt, PJREQ req )
+jrdp_snd_pkt( PJLISTENER lstner, PJPACKET pkt, PJREQ req )
 {
     int n;
     printf( "Sending pkt %d.", pkt->seq );
-    n = sendto( ( ( jrdp_prvsock != -1 ) ? jrdp_prvsock : jrdp_srvsock ), pkt->start, pkt->length, 0, (struct sockaddr*)&(req->peer), sizeof(struct sockaddr_in) );
+    n = sendto( ( ( lstner->prvsock != -1 ) ? lstner->prvsock : lstner->sock ), pkt->start, pkt->length, 0, (struct sockaddr*)&(req->peer), sizeof(struct sockaddr_in) );
     if ( n == pkt->length )
         return 0;
     printf( "Attempt to send message failed; sent %d bytes of %d", n, pkt->length );
@@ -1612,20 +1613,25 @@ check_for_pending:
     if ( jrdp_sock != -1 )
         FD_SET( jrdp_sock, &readfds );
 
+    /*
     if ( jrdp_srvsock != -1 )
         FD_SET( jrdp_srvsock, &readfds );
     if ( jrdp_prvsock != -1 )
         FD_SET( jrdp_prvsock, &readfds );
+    */
 
     select_zerotimearg = zerotime;
-    select_retval = select( max( jrdp_sock, max( jrdp_srvsock, jrdp_prvsock )) + 1, &readfds, (fd_set*)0, (fd_set*)0, &select_zerotimearg );
+    //select_retval = select( max( jrdp_sock, max( jrdp_srvsock, jrdp_prvsock )) + 1, &readfds, (fd_set*)0, (fd_set*)0, &select_zerotimearg );
+    select_retval = select( jrdp_sock + 1, &readfds, (fd_set*)0, (fd_set*)0, &select_zerotimearg );
 
     /* If either of the server ports are ready for reading, read them first */
+    /*
     if ( ( select_retval != -1 ) && ( ( ( jrdp_srvsock != -1 ) && FD_ISSET( jrdp_srvsock, &readfds ) ) || ( ( jrdp_prvsock != -1 ) && FD_ISSET( jrdp_prvsock, &readfds ) ) ) )
     {
-        (*jrdp__accept)( 0, 0 );
+        (*jrdp__accept)( lstner, 0, 0 );
         goto check_for_pending;
     }
+    */
 
     /* If select_retval is zero, then nothing to process, check for timeouts */
     if ( select_retval == 0 )
@@ -2186,7 +2192,7 @@ jrdp_retransmit_unacked_packets( PJREQ req )
 }
 
 int
-jrdp_reply( PJREQ req, int flags, const char* message, int len )
+jrdp_reply( PJLISTENER lstner, PJREQ req, int flags, const char* message, int len )
 {
     int tmp;
 
@@ -2194,7 +2200,7 @@ jrdp_reply( PJREQ req, int flags, const char* message, int len )
     if ( tmp )
         return tmp;
     if ( flags & JRDP_R_COMPLETE )
-        return jrdp_respond( req, JRDP_R_COMPLETE );
+        return jrdp_respond( lstner, req, JRDP_R_COMPLETE );
 
     /* Check to see if any packets are done */
     if ( req->outpkt && req->outpkt->next )
@@ -2203,7 +2209,7 @@ jrdp_reply( PJREQ req, int flags, const char* message, int len )
         /* Hold out final packet */
         tpkt = req->outpkt->prev;
         EXTRACT_ITEM( tpkt, req->outpkt );
-        tmp = jrdp_respond( req, JRDP_R_INCOMPLETE );
+        tmp = jrdp_respond( lstner, req, JRDP_R_INCOMPLETE );
         APPEND_ITEM( tpkt, req->outpkt );
         if ( tmp )
             return tmp;
@@ -2212,7 +2218,7 @@ jrdp_reply( PJREQ req, int flags, const char* message, int len )
 }
 
 int
-jrdp_respond( PJREQ req, int flags )
+jrdp_respond( PJLISTENER lstner, PJREQ req, int flags )
 {
     char        buf[JRDP_PKT_DSZ];
     int         retval = JRDP_SUCCESS;
@@ -2330,7 +2336,7 @@ jrdp_respond( PJREQ req, int flags )
     /* Only send if packet not yet received. */
     /* Do honor the window of req->pwindow_sz packets.  */
     if ( !( flags & JRDP_R_NOSEND ) && ( req->outpkt->seq <= ( req->prcvd_thru + req->pwindow_sz ) ) && ( req->outpkt->seq > req->prcvd_thru ) )
-        retval = jrdp_snd_pkt( req->outpkt, req );
+        retval = jrdp_snd_pkt( lstner, req->outpkt, req );
 
     /* Add packet to req->trns */
     tpkt = req->outpkt;
@@ -2345,39 +2351,39 @@ jrdp_respond( PJREQ req, int flags )
     {
         PJREQ match_in_runQ;
 
-        //EXTERN_MUTEXED_LOCK(jrdp_runQ);
-        for ( match_in_runQ = jrdp_runQ; match_in_runQ; match_in_runQ = match_in_runQ->next )
+        //EXTERN_MUTEXED_LOCK(lstner->runQ);
+        for ( match_in_runQ = lstner->runQ; match_in_runQ; match_in_runQ = match_in_runQ->next )
         {
             if ( match_in_runQ == req )
             {
-                EXTRACT_ITEM( req, jrdp_runQ );
+                EXTRACT_ITEM( req, lstner->runQ );
                 break;
             }
         }
-        //EXTERN_MUTEXED_UNLOCK(jrdp_runQ);
-        if ( ( req->cid == 0 ) || ( jrdp_replyQ_max_len <= 0 ) )
+        //EXTERN_MUTEXED_UNLOCK(lstner->runQ);
+        if ( ( req->cid == 0 ) || ( lstner->replyQ_max_len <= 0 ) )
             jrdp_reqfree(req);
         else
         {
-            //EXTERN_MUTEXED_LOCK(jrdp_doneQ);
-            if ( jrdp_replyQ_len <= jrdp_replyQ_max_len )
+            //EXTERN_MUTEXED_LOCK(lstner->doneQ);
+            if ( lstner->replyQ_len <= lstner->replyQ_max_len )
             {
-                PREPEND_ITEM( req, jrdp_doneQ );
-                ++jrdp_replyQ_len;
+                PREPEND_ITEM( req, lstner->doneQ );
+                ++lstner->replyQ_len;
             }
             else
             {
-                register PJREQ doneQ_lastitem = jrdp_doneQ->prev;
+                register PJREQ doneQ_lastitem = lstner->doneQ->prev;
                 /* Add new request to start */
-                PREPEND_ITEM( req, jrdp_doneQ );
+                PREPEND_ITEM( req, lstner->doneQ );
 
                 if ( doneQ_lastitem->svc_rwait_seq > doneQ_lastitem->prcvd_thru )
                     printf( "Requested ack never received (%d of %d/%d ack)", doneQ_lastitem->prcvd_thru, doneQ_lastitem->svc_rwait_seq, doneQ_lastitem->trns_tot );
                 /* Now do the removal and free it. */
-                EXTRACT_ITEM( doneQ_lastitem, jrdp_doneQ );
+                EXTRACT_ITEM( doneQ_lastitem, lstner->doneQ );
                 jrdp_reqfree(doneQ_lastitem);
             }
-            //EXTERN_MUTEXED_UNLOCK(jrdp_doneQ);
+            //EXTERN_MUTEXED_UNLOCK(lstner->doneQ);
         }
     }
     return retval;
@@ -2406,31 +2412,6 @@ rudp_connect( const char* dname, struct sockaddr_in* dest )
         exit(-1);
     }
 
-    /* Now bind the port. */
-    memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
-    jrdp_client_address_port.sin_family = AF_INET;
-    jrdp_client_address_port.sin_addr.s_addr = myaddress();
-    if ( bind( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, sizeof(struct sockaddr_in) ) )
-    {
-        printf( "JRDP: bind() completed with error: client address(port) are: %s(%d)", inet_ntoa(jrdp_client_address_port.sin_addr), ntohs(jrdp_client_address_port.sin_port) );
-        close(jrdp_sock);
-        jrdp_sock = -1;
-        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in));
-        exit(-1);
-    }
-
-    /* OK, we now have successfully bound, either to a prived or non-priv'd port. */
-    memset( &jrdp_client_address_port, 0, sizeof(struct sockaddr_in));
-    /* Returns 0 on success, -1 on failure. */
-    if ( getsockname( jrdp_sock, (struct sockaddr*)&jrdp_client_address_port, (socklen_t*)&tmp) )
-    {
-        printf( "JRDP: getsockname() completed with error: client address(port) are: %s(%d)", inet_ntoa(jrdp_client_address_port.sin_addr), ntohs(jrdp_client_address_port.sin_port) );
-        close(jrdp_sock);
-        jrdp_sock = -1;
-        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
-        exit(-1);
-    }
-
 
     if ( !dest || ( dest->sin_addr.s_addr == 0 ) )
     {
@@ -2448,6 +2429,14 @@ rudp_connect( const char* dname, struct sockaddr_in* dest )
     }
     else
         memcpy( &peer_addr, dest, sizeof(struct sockaddr_in) );
+
+    if ( connect( jrdp_sock, (struct sockaddr*)&peer_addr, sizeof(struct sockaddr_in) ) )
+    {
+        printf( "JRDP: connect() completed with error.\n" );
+        close(jrdp_sock);
+        jrdp_sock = -1;
+        exit(-1);
+    }
 
     return 0;
 }
@@ -2527,4 +2516,124 @@ rudp_send( int flags, const char* buf, int buflen, int ttwait )
         return jrdp_retrieve( req, ttwait );
     else
         return JRDP_PENDING;
+}
+
+PJLISTENER
+rudp_open_listen( const char* portname )
+{
+    printf( "\nEntering rudp_open_listen()\n" );
+    struct sockaddr_in s_in = {AF_INET};
+    struct servent* sp;
+
+    int             on = 1;
+    int             port_no = 0;
+
+    jrdp__accept = jrdp_accept;
+
+    if ( !portname || !*portname )
+    {
+        printf( "rudp_open_listen() did not get a valid port name as an argument; using the default server port: %d\n", DEFAULT_PORT );
+        s_in.sin_port = htons( (u_int16_t) DEFAULT_PORT );
+    }
+    else if ( *portname == '#' )
+    {
+        sscanf( portname + 1, "%d", &port_no );
+        if ( port_no == 0 )
+        {
+            printf( "rudp_open_listen: cannot bind: \"%s\" is an invalid port specifier; port number must follow #\n", portname );
+            return NULL;
+        }
+        s_in.sin_port = htons( (u_int16_t) port_no );
+    }
+    else if ( ( sp = getservbyname( portname, "udp" ) ) != NULL )
+    {
+        s_in.sin_port = sp->s_port;
+    }
+    /*
+    else if ( strcmp( portname, DEFAULT_PEER ) == 0 )
+    {
+        printf( "rudp_open_listen: udp/%s unknown service - using %d\n", DEFAULT_PEER, DEFAULT_PORT );
+        s_in.sin_port = htons( (u_int16_t) DEFAULT_PORT );
+    }
+    */
+    else
+    {
+        printf( "rudp_open_listen: udp/%s unknown service\n", portname );
+        return NULL;
+    }
+
+    PJLISTENER lstner = rudp_lstneralloc();
+
+    if ( ( lstner->sock = socket( AF_INET, SOCK_DGRAM, 0 ) ) < 0)
+    {
+        printf( "rudp_open_listen: Can't open socket\n" );
+        return NULL;
+    }
+
+    if ( setsockopt( lstner->sock, SOL_SOCKET, SO_REUSEADDR, (char *) &on, sizeof(on)) < 0 )
+        printf( "dirsrv: setsockopt (SO_REUSEADDR): error; continuing as best we can.\n" );
+    
+    s_in.sin_addr.s_addr = (u_int32_t) myaddress();
+
+    if ( bind( lstner->sock, (struct sockaddr *)&s_in, sizeof(struct sockaddr_in) ) < 0 )
+    {
+        printf( "rudp_open_listen(): Can not bind socket\n" );
+        return NULL;
+    }
+
+    lstner->port = ntohs(s_in.sin_port);
+
+    return lstner;
+
+}
+
+PJLISTENER
+rudp_lstneralloc(void)
+{
+    PJLISTENER    lstner;
+    lstner = (PJLISTENER)malloc( sizeof(JLISTENER) );
+    if ( !lstner )
+        return NULL;
+    ++rudp_jlstner_count;
+
+    lstner->sock = -1;
+    lstner->prvsock = -1;
+    lstner->port = -1;
+
+    lstner->req_count = 0;
+    lstner->pkt_count = 0;
+
+    lstner->pendingQ_len = 0;
+    lstner->partialQ_len = 0;
+    lstner->partialQ_max_len = 20;
+    lstner->replyQ_len = 0;
+    lstner->replyQ_max_len = 20;
+
+    lstner->pendingQ = NULL;
+    lstner->partialQ = NULL;
+    lstner->runQ = NULL;
+    lstner->doneQ = NULL;
+
+    lstner->prev = NULL;
+    lstner->next = NULL;
+
+    return lstner;
+}
+
+int
+rudp_close_listen( PJLISTENER lstner )
+{
+    close(lstner->sock);
+
+    rudp_lstnerfree(lstner);
+
+    return 0;
+}
+
+void
+rudp_lstnerfree( PJLISTENER lstner )
+{
+    free(lstner);
+
+    return;
 }

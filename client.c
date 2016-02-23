@@ -137,6 +137,7 @@ p_command_line_preparse( int* argcp, char** argv )
 
 void child_process(int num_loops)
 {
+    int cltsock;
     int length;
     int ret_val;
     int flag = JRDP_PACK_COMPLETE;
@@ -148,7 +149,7 @@ void child_process(int num_loops)
 
     sprintf( mach_name, "%s(%d)", SAMPLE_DEFAULT_SUPER_SERVER_HOST, SAMPLE_DEFAULT_SERVER_PORT );
 
-    rudp_connect( mach_name, NULL );
+    cltsock = rudp_connect( mach_name, NULL );
 
     /* Loop N times */
     pid = getpid();
@@ -157,12 +158,12 @@ void child_process(int num_loops)
         sprintf( BUFFER, "This is the client #%d sending to super server msg #%d\n", (int)pid, i );
         length = strlen(BUFFER);
 
-        if ( ( ret_val = rudp_send( flag, BUFFER, length, -1 ) ) )
+        if ( ( ret_val = rudp_send( cltsock, flag, BUFFER, length, -1 ) ) )
         {
             printf( "jrdp_send, status err.\n" );
             exit(1);
         }
     }
 
-    rudp_disconnect();
+    rudp_disconnect(cltsock);
 }

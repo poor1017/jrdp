@@ -10,6 +10,7 @@
 
 u_int16_t global_cid = 13148;
 int rudp_jlstner_count = 0;
+int rudp_jsnder_count = 0;
 int jreq_count = 0;
 int jpkt_count = 0;
 //int jrdp_srvsock = -1;
@@ -19,9 +20,10 @@ int jrdp_sock = -1;
 static char* myhname = NULL;
 static long myhaddr = 0L;
 struct sockaddr_in jrdp_client_address_port;
-struct sockaddr_in peer_addr;
+//struct sockaddr_in peer_addr;
 
-PJLISTENER rudp_lstnerQ = NULL;
+PJLISTENER  rudp_lstnerQ = NULL;
+PJSENDER    rudp_snderQ =NULL;
 PJREQ jrdp_activeQ = NULL;
 PJREQ jrdp_completeQ = NULL;
 //PJREQ jrdp_pendingQ = NULL;
@@ -671,7 +673,7 @@ jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait )
     APPEND_ITEM( req, jrdp_activeQ );
     ++jrdp_activeQ_len;
     req->wait_till = jrdp__addtime( jrdp__gettimeofday(), req->timeout_adj );
-    if ( jrdp_xmit( req, req->pwindow_sz ) )
+    if ( jrdp_xmit( NULL, req, req->pwindow_sz ) )
     {
         printf( "Xmit packets failed.\n" );
         exit(-1);
@@ -679,7 +681,7 @@ jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait )
     //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
 
     if ( ttwait )
-        return jrdp_retrieve( req, ttwait );
+        return jrdp_retrieve( NULL, req, ttwait );
     else
         return JRDP_PENDING;
 }
@@ -1226,7 +1228,7 @@ jrdp_accept( PJLISTENER lstner, int timeout_sec, int timeout_usec )
 }
 
 int
-jrdp_xmit( PJREQ req, int window )
+jrdp_xmit( PJSENDER snder, PJREQ req, int window )
 {
     PJPACKET        ptmp;
     u_int16_t       stmp;
@@ -1287,7 +1289,7 @@ jrdp_xmit( PJREQ req, int window )
             printf( "...");
 
             //ns = sendto( jrdp_sock,(char*)(ptmp->start), ptmp->length, 0, (struct sockaddr*)&(req->peer), sizeof(struct sockaddr_in) );
-            ns = send( jrdp_sock, (char*)(ptmp->start), ptmp->length, MSG_NOSIGNAL );
+            ns = send( snder->sock, (char*)(ptmp->start), ptmp->length, MSG_NOSIGNAL );
 
             if ( ns != ptmp->length )
             {
@@ -1589,7 +1591,7 @@ jrdp_header_ack_rwait( PJPACKET pkt, PJREQ req, int is_ack_needed, int is_rwait_
 }
 
 int
-jrdp_process_active()
+jrdp_process_active( PJSENDER snder )
 {
     fd_set              readfds;
     struct sockaddr_in  from; /* Reply received from */
@@ -1614,8 +1616,8 @@ jrdp_process_active()
 check_for_pending:
 
     FD_ZERO(&readfds);
-    if ( jrdp_sock != -1 )
-        FD_SET( jrdp_sock, &readfds );
+    if ( snder->sock != -1 )
+        FD_SET( snder->sock, &readfds );
 
     /*
     if ( jrdp_srvsock != -1 )
@@ -1626,7 +1628,7 @@ check_for_pending:
 
     select_zerotimearg = zerotime;
     //select_retval = select( max( jrdp_sock, max( jrdp_srvsock, jrdp_prvsock )) + 1, &readfds, (fd_set*)0, (fd_set*)0, &select_zerotimearg );
-    select_retval = select( jrdp_sock + 1, &readfds, (fd_set*)0, (fd_set*)0, &select_zerotimearg );
+    select_retval = select( snder->sock + 1, &readfds, (fd_set*)0, (fd_set*)0, &select_zerotimearg );
 
     /* If either of the server ports are ready for reading, read them first */
     /*
@@ -1646,7 +1648,7 @@ check_for_pending:
         {
             if ( req->status == JRDP_STATUS_ACKPEND )
             {
-                jrdp_xmit( req, -1 );
+                jrdp_xmit( snder, req, -1 );
                 req->status = JRDP_STATUS_ACTIVE;
             }
             if ( jrdp__eqtime( now, zerotime ) )
@@ -1663,7 +1665,7 @@ check_for_pending:
                     if ( jrdp__eqtime( now, zerotime ) )
                         now = jrdp__gettimeofday();
                     req->wait_till = jrdp__addtime( req->timeout_adj, now );
-                    jrdp_xmit( req, req->pwindow_sz );
+                    jrdp_xmit( snder, req, req->pwindow_sz );
                 }
                 else
                 {
@@ -1683,9 +1685,9 @@ check_for_pending:
     }
 
     /* If negative, then return an error */
-    if ( ( select_retval < 0) || !FD_ISSET( jrdp_sock, &readfds ) )
+    if ( ( select_retval < 0) || !FD_ISSET( snder->sock, &readfds ) )
     {
-        printf( "select failed : returned %d port=%d\n", select_retval, jrdp_sock );
+        printf( "select failed : returned %d port=%d\n", select_retval, snder->sock );
         exit(-1);
     }
 
@@ -1694,7 +1696,7 @@ check_for_pending:
     pkt->start = pkt->data;
     from_sz = sizeof(struct sockaddr_in);
 
-    if ( (nr = recvfrom( jrdp_sock, pkt->start, JRDP_PKT_DSZ, 0, (struct sockaddr*)&from, &from_sz ) ) < 0 )
+    if ( (nr = recvfrom( snder->sock, pkt->start, JRDP_PKT_DSZ, 0, (struct sockaddr*)&from, &from_sz ) ) < 0 )
     {
         printf( "recvfrom fails.\n" );
         jrdp_pktfree(pkt);
@@ -1857,7 +1859,7 @@ check_for_pending:
                 memcpy( &(req->peer.sin_port), ctlptr, sizeof(char)*2 );
                 ctlptr += 2;
                 printf( "  ***JRDP redirect to %s(%d)***", inet_ntoa(req->peer.sin_addr), ntohs(req->peer.sin_port) );
-                jrdp_xmit( req, req->pwindow_sz );
+                jrdp_xmit( snder, req, req->pwindow_sz );
             }
             break;
         /* options 6 & 7 (forwarded) are for servers only */
@@ -1935,7 +1937,7 @@ check_for_pending:
         printf( "Receive unsequenced control packet.\n" );
         if ( retransmit_unacked_packets )
         {
-            jrdp_retransmit_unacked_packets(req);
+            jrdp_retransmit_unacked_packets( snder, req );
             retransmit_unacked_packets = 0;
         }
         //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
@@ -2062,7 +2064,7 @@ req_complete:
             printf( "ACTION: Acknowledging final packet\n" );
         /* Don't need to call jrdp_headers() to set ACK bit; we do not need an
          * ACK from the server, and no data packets will be transmitted.  */
-        jrdp_xmit( req, req->pwindow_sz );
+        jrdp_xmit( snder, req, req->pwindow_sz );
     }
 
     req->status = JRDP_STATUS_COMPLETE;
@@ -2078,7 +2080,7 @@ req_complete:
 }
 
 int
-jrdp_retrieve( PJREQ req, int ttwait_arg )
+jrdp_retrieve( PJSENDER snder, PJREQ req, int ttwait_arg )
 {
     fd_set          readfds;
     struct timeval  selwait_st; /* Time to wait for select       */
@@ -2118,7 +2120,7 @@ jrdp_retrieve( PJREQ req, int ttwait_arg )
 
  check_for_more:
 
-    jrdp_process_active();
+    jrdp_process_active(snder);
 
     if ( !req && jrdp_completeQ )
       return 999;//PSUCCESS;
@@ -2168,9 +2170,9 @@ restart_select:
     printf( "Waiting %ld.%06ld seconds for reply...", selwait_st.tv_sec, selwait_st.tv_usec );
 
     FD_ZERO(&readfds);
-    FD_SET( jrdp_sock, &readfds);
+    FD_SET( snder->sock, &readfds);
 
-    tmp = select( jrdp_sock + 1, &readfds, (fd_set*)0, (fd_set*)0, &selwait_st );
+    tmp = select( snder->sock + 1, &readfds, (fd_set*)0, (fd_set*)0, &selwait_st );
 
     if ( tmp >= 0 )
         goto check_for_more;
@@ -2184,13 +2186,13 @@ restart_select:
 }
 
 int
-jrdp_retransmit_unacked_packets( PJREQ req )
+jrdp_retransmit_unacked_packets( PJSENDER snder, PJREQ req )
 {
     assert( req->trns_tot > 0 );
     if ( req->prcvd_thru < req->trns_tot )
     {
         jrdp_headers(req);
-        jrdp_xmit( req, req->pwindow_sz );
+        jrdp_xmit( snder, req, req->pwindow_sz );
     }
     return JRDP_SUCCESS;
 }
@@ -2399,18 +2401,11 @@ jrdp_respond( PJLISTENER lstner, PJREQ req, int flags )
 int
 rudp_connect( const char* dname, struct sockaddr_in* dest )
 {
-    if ( jrdp_sock != -1 )
-    {
-        close(jrdp_sock);
-        jrdp_sock = -1;
-        //printf( "jrdp_init(): closing port # %d; opening new one...", ntohs(jrdp_client_address_port.sin_port) );
-        memset( &jrdp_client_address_port, '\000', sizeof(struct sockaddr_in) );
-    }
-
-    //jrdp__set_def_port_no();
+    PJSENDER snder = rudp_snderalloc();
+    APPEND_ITEM( snder, rudp_snderQ );
 
     /* Open the local socket from which packets will be sent */
-    if ( (jrdp_sock = socket( AF_INET, SOCK_DGRAM, 0 ) ) < 0 )
+    if ( ( snder->sock = socket( AF_INET, SOCK_DGRAM, 0 ) ) < 0 )
     {
         printf( "jrdp: Can't open client's sending socket.\n" );
         exit(-1);
@@ -2425,38 +2420,42 @@ rudp_connect( const char* dname, struct sockaddr_in* dest )
             exit(-1);
         }
 
-        if ( jrdp_hostname2name_addr( dname, NULL, &peer_addr ) )
+        if ( jrdp_hostname2name_addr( dname, NULL, &snder->peer_addr ) )
         {
             printf( "Bad host name.\n" );
             exit(-1);
         }
     }
     else
-        memcpy( &peer_addr, dest, sizeof(struct sockaddr_in) );
+        memcpy( &snder->peer_addr, dest, sizeof(struct sockaddr_in) );
 
-    if ( connect( jrdp_sock, (struct sockaddr*)&peer_addr, sizeof(struct sockaddr_in) ) )
+    if ( connect( snder->sock, (struct sockaddr*)&snder->peer_addr, sizeof(struct sockaddr_in) ) )
     {
         printf( "JRDP: connect() completed with error.\n" );
-        close(jrdp_sock);
-        jrdp_sock = -1;
+        rudp_disconnect(snder->sock);
         exit(-1);
     }
 
+    return snder->sock;
+}
+
+int
+rudp_disconnect( int sock )
+{
+    PJSENDER snder = rudp_find_matched_snder(sock);
+
+    close(snder->sock);
+
+    rudp_snderfree(snder);
+
     return 0;
 }
 
 int
-rudp_disconnect()
+rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait )
 {
-    close(jrdp_sock);
-    jrdp_sock = -1;
+    PJSENDER snder = rudp_find_matched_snder(sock);
 
-    return 0;
-}
-
-int
-rudp_send( int flags, const char* buf, int buflen, int ttwait )
-{
     PJREQ req;
     if ( ( req = jrdp_reqalloc() ) == NULL )
     {
@@ -2473,7 +2472,7 @@ rudp_send( int flags, const char* buf, int buflen, int ttwait )
 
     PJPACKET ptmp;
 
-    memcpy( &(req->peer), &peer_addr, sizeof(struct sockaddr_in) );
+    memcpy( &(req->peer), &snder->peer_addr, sizeof(struct sockaddr_in) );
 
     if ( req->status == JRDP_STATUS_FREE )
     {
@@ -2509,7 +2508,7 @@ rudp_send( int flags, const char* buf, int buflen, int ttwait )
     APPEND_ITEM( req, jrdp_activeQ );
     ++jrdp_activeQ_len;
     req->wait_till = jrdp__addtime( jrdp__gettimeofday(), req->timeout_adj );
-    if ( jrdp_xmit( req, req->pwindow_sz ) )
+    if ( jrdp_xmit( snder, req, req->pwindow_sz ) )
     {
         printf( "Xmit packets failed.\n" );
         exit(-1);
@@ -2517,7 +2516,7 @@ rudp_send( int flags, const char* buf, int buflen, int ttwait )
     //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
 
     if ( ttwait )
-        return jrdp_retrieve( req, ttwait );
+        return jrdp_retrieve( snder, req, ttwait );
     else
         return JRDP_PENDING;
 }
@@ -2625,6 +2624,30 @@ rudp_lstneralloc(void)
     return lstner;
 }
 
+PJSENDER
+rudp_snderalloc(void)
+{
+    PJSENDER    snder;
+    snder = (PJSENDER)malloc( sizeof(JSENDER) );
+    if ( !snder )
+        return NULL;
+    ++rudp_jsnder_count;
+
+    snder->sock = -1;
+    memset( &(snder->peer_addr), '\000', sizeof(struct sockaddr_in) );
+
+    snder->req_count = 0;
+    snder->pkt_count = 0;
+
+    snder->activeQ = NULL;
+    snder->completeQ = NULL;
+
+    snder->prev = NULL;
+    snder->next = NULL;
+
+    return snder;
+}
+
 int
 rudp_close_listen( int sock )
 {
@@ -2645,11 +2668,30 @@ rudp_lstnerfree( PJLISTENER lstner )
     return;
 }
 
+void
+rudp_snderfree( PJSENDER snder )
+{
+    free(snder);
+}
+
 PJLISTENER
 rudp_find_matched_lstner( int sock )
 {
     PJLISTENER tmp;
     for ( tmp = rudp_lstnerQ; tmp; tmp = tmp->next )
+    {
+        if ( tmp->sock == sock )
+            return tmp;
+    }
+
+    return NULL;
+}
+
+PJSENDER
+rudp_find_matched_snder( int sock )
+{
+    PJSENDER tmp;
+    for ( tmp = rudp_snderQ; tmp; tmp = tmp->next )
     {
         if ( tmp->sock == sock )
             return tmp;

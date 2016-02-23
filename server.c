@@ -25,7 +25,7 @@ main( int argc, char** argv )
     int i;
     int srvsock;
     PJREQ req;
-    char port[80];
+    //char port[80];
     int retval;
     char BUFFER[256];
     int length = 0;

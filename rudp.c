@@ -21,6 +21,7 @@ static long myhaddr = 0L;
 struct sockaddr_in jrdp_client_address_port;
 struct sockaddr_in peer_addr;
 
+PJLISTENER rudp_lstnerQ = NULL;
 PJREQ jrdp_activeQ = NULL;
 PJREQ jrdp_completeQ = NULL;
 //PJREQ jrdp_pendingQ = NULL;
@@ -417,15 +418,17 @@ jrdp_bind_port( const char* portname )
 */
 
 PJREQ
-jrdp_get_nxt_blocking( PJLISTENER lstner )
+jrdp_get_nxt_blocking( int sock )
 {
     PJREQ   nxtreq = NULL;
     fd_set  readfds;
     int     tmp;
 
+    PJLISTENER lstner = rudp_find_matched_lstner(sock);
+
     while ( 1 )
     {
-        if ( ( nxtreq = jrdp_get_nxt_nonblocking(lstner) ) )
+        if ( ( nxtreq = jrdp_get_nxt_nonblocking(sock) ) )
             break;
 
         FD_ZERO(&readfds);
@@ -446,8 +449,9 @@ jrdp_get_nxt_blocking( PJLISTENER lstner )
 }
 
 PJREQ
-jrdp_get_nxt_nonblocking( PJLISTENER lstner )
+jrdp_get_nxt_nonblocking( int sock )
 {
+    PJLISTENER lstner = rudp_find_matched_lstner(sock);
     if ( jrdp_accept( lstner, 0, 0 ) )
     {
         printf( "jrdp: receive request failed.\n" );
@@ -2192,8 +2196,10 @@ jrdp_retransmit_unacked_packets( PJREQ req )
 }
 
 int
-jrdp_reply( PJLISTENER lstner, PJREQ req, int flags, const char* message, int len )
+jrdp_reply( int sock, PJREQ req, int flags, const char* message, int len )
 {
+    PJLISTENER lstner = rudp_find_matched_lstner(sock);
+
     int tmp;
 
     tmp = jrdp_pack( req, flags, message, len );
@@ -2393,8 +2399,6 @@ jrdp_respond( PJLISTENER lstner, PJREQ req, int flags )
 int
 rudp_connect( const char* dname, struct sockaddr_in* dest )
 {
-    int tmp = sizeof(struct sockaddr_in);
-
     if ( jrdp_sock != -1 )
     {
         close(jrdp_sock);
@@ -2518,7 +2522,7 @@ rudp_send( int flags, const char* buf, int buflen, int ttwait )
         return JRDP_PENDING;
 }
 
-PJLISTENER
+int
 rudp_open_listen( const char* portname )
 {
     printf( "\nEntering rudp_open_listen()\n" );
@@ -2541,7 +2545,7 @@ rudp_open_listen( const char* portname )
         if ( port_no == 0 )
         {
             printf( "rudp_open_listen: cannot bind: \"%s\" is an invalid port specifier; port number must follow #\n", portname );
-            return NULL;
+            return -1;
         }
         s_in.sin_port = htons( (u_int16_t) port_no );
     }
@@ -2559,15 +2563,16 @@ rudp_open_listen( const char* portname )
     else
     {
         printf( "rudp_open_listen: udp/%s unknown service\n", portname );
-        return NULL;
+        return -1;
     }
 
     PJLISTENER lstner = rudp_lstneralloc();
+    APPEND_ITEM( lstner, rudp_lstnerQ );
 
     if ( ( lstner->sock = socket( AF_INET, SOCK_DGRAM, 0 ) ) < 0)
     {
         printf( "rudp_open_listen: Can't open socket\n" );
-        return NULL;
+        return -1;
     }
 
     if ( setsockopt( lstner->sock, SOL_SOCKET, SO_REUSEADDR, (char *) &on, sizeof(on)) < 0 )
@@ -2578,12 +2583,12 @@ rudp_open_listen( const char* portname )
     if ( bind( lstner->sock, (struct sockaddr *)&s_in, sizeof(struct sockaddr_in) ) < 0 )
     {
         printf( "rudp_open_listen(): Can not bind socket\n" );
-        return NULL;
+        return -1;
     }
 
     lstner->port = ntohs(s_in.sin_port);
 
-    return lstner;
+    return lstner->sock;
 
 }
 
@@ -2621,8 +2626,10 @@ rudp_lstneralloc(void)
 }
 
 int
-rudp_close_listen( PJLISTENER lstner )
+rudp_close_listen( int sock )
 {
+    PJLISTENER lstner = rudp_find_matched_lstner(sock);
+
     close(lstner->sock);
 
     rudp_lstnerfree(lstner);
@@ -2636,4 +2643,17 @@ rudp_lstnerfree( PJLISTENER lstner )
     free(lstner);
 
     return;
+}
+
+PJLISTENER
+rudp_find_matched_lstner( int sock )
+{
+    PJLISTENER tmp;
+    for ( tmp = rudp_lstnerQ; tmp; tmp = tmp->next )
+    {
+        if ( tmp->sock == sock )
+            return tmp;
+    }
+
+    return NULL;
 }

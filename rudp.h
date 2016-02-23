@@ -274,6 +274,7 @@ typedef struct jlistener    JLISTENER;
 struct jsender
 {
     int                 sock;
+    int                 last_pid;
     struct sockaddr_in  peer_addr;
     int                 req_count;
     int                 pkt_count;
@@ -326,6 +327,7 @@ int             rudp_disconnect( int sock );
 int             rudp_close_listen( int sock );
 PJLISTENER      rudp_find_matched_lstner( int sock );
 PJSENDER        rudp_find_matched_snder( int sock );
+u_int16_t       rudp_nxt_cid( PJSENDER snder );
 
 struct timeval  jrdp__gettimeofday(void);
 int             jrdp__eqtime( const struct timeval t1, const struct timeval t2 );

@@ -8,7 +8,7 @@
 #include <arpa/inet.h>
 #include "rudp.h"
 
-u_int16_t global_cid = 13148;
+//u_int16_t global_cid = 13148;
 int rudp_jlstner_count = 0;
 int rudp_jsnder_count = 0;
 int jreq_count = 0;
@@ -2401,7 +2401,7 @@ rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait )
     }
 
     /* Assign connection ID */
-    req->cid = global_cid++; // jrdp_next_cid();
+    req->cid = rudp_nxt_cid(snder);
 
     if ( jrdp_headers(req) )
     {
@@ -2540,6 +2540,7 @@ rudp_snderalloc(void)
     ++rudp_jsnder_count;
 
     snder->sock = -1;
+    snder->last_pid = getpid();
     memset( &(snder->peer_addr), '\000', sizeof(struct sockaddr_in) );
 
     snder->req_count = 0;
@@ -2605,4 +2606,34 @@ rudp_find_matched_snder( int sock )
     }
 
     return NULL;
+}
+
+u_int16_t
+rudp_nxt_cid( PJSENDER snder )
+{
+    static u_int16_t    next_conn_id = 0;
+
+    int                 pid = getpid();
+
+    if ( !snder->last_pid )
+    {
+        printf( "rudp_nxt_cid(): strange behavior!\n" );
+        exit(-1);
+    }
+    if ( snder->last_pid != pid )
+    {
+        printf( "maybe it's caused by client fork function, need further development.\n" );
+        exit(-1);
+    }
+
+    if ( next_conn_id == 0 )
+    {
+        srand( pid + time(0) );
+        next_conn_id = rand();
+        snder->last_pid = pid;
+    }
+    if ( ++next_conn_id == 0 )
+        ++next_conn_id;
+
+    return (htons(next_conn_id));
 }

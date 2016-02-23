@@ -35,9 +35,9 @@ main( int argc, char** argv )
 
     jrdp_initialize();
 
-    sprintf( port, "#%d", SAMPLE_DEFAULT_SERVER_PORT );
+    //sprintf( port, "#%d", SAMPLE_DEFAULT_SERVER_PORT );
 
-    srvsock = rudp_open_listen(port);
+    srvsock = rudp_open_listen(SAMPLE_DEFAULT_SERVER_PORT);
 
     /*
     if ( lstner )

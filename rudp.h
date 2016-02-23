@@ -320,7 +320,7 @@ int             jrdp_reply( int sock, PJREQ req, int flags, const char* message,
 int             jrdp_respond( PJLISTENER lstner, PJREQ req, int flags );
 void            jrdp_update_cfields( PJREQ existing, PJREQ newing );
 
-int             rudp_open_listen( const char* portname );
+int             rudp_open_listen( u_int16_t port );
 int             rudp_connect( const char* dname, struct sockaddr_in* dest );
 int             rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait );
 int             rudp_disconnect( int sock );

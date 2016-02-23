@@ -2428,48 +2428,13 @@ rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait )
 }
 
 int
-rudp_open_listen( const char* portname )
+rudp_open_listen( u_int16_t port )
 {
     printf( "\nEntering rudp_open_listen()\n" );
     struct sockaddr_in s_in = {AF_INET};
-    struct servent* sp;
-
+    s_in.sin_port = htons(port);
     int             on = 1;
-    int             port_no = 0;
-
     jrdp__accept = jrdp_accept;
-
-    if ( !portname || !*portname )
-    {
-        printf( "rudp_open_listen() did not get a valid port name as an argument; using the default server port: %d\n", DEFAULT_PORT );
-        s_in.sin_port = htons( (u_int16_t) DEFAULT_PORT );
-    }
-    else if ( *portname == '#' )
-    {
-        sscanf( portname + 1, "%d", &port_no );
-        if ( port_no == 0 )
-        {
-            printf( "rudp_open_listen: cannot bind: \"%s\" is an invalid port specifier; port number must follow #\n", portname );
-            return -1;
-        }
-        s_in.sin_port = htons( (u_int16_t) port_no );
-    }
-    else if ( ( sp = getservbyname( portname, "udp" ) ) != NULL )
-    {
-        s_in.sin_port = sp->s_port;
-    }
-    /*
-    else if ( strcmp( portname, DEFAULT_PEER ) == 0 )
-    {
-        printf( "rudp_open_listen: udp/%s unknown service - using %d\n", DEFAULT_PEER, DEFAULT_PORT );
-        s_in.sin_port = htons( (u_int16_t) DEFAULT_PORT );
-    }
-    */
-    else
-    {
-        printf( "rudp_open_listen: udp/%s unknown service\n", portname );
-        return -1;
-    }
 
     PJLISTENER lstner = rudp_lstneralloc();
     APPEND_ITEM( lstner, rudp_lstnerQ );
@@ -2494,7 +2459,6 @@ rudp_open_listen( const char* portname )
     lstner->port = ntohs(s_in.sin_port);
 
     return lstner->sock;
-
 }
 
 PJLISTENER

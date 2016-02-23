@@ -277,6 +277,7 @@ struct jsender
     struct sockaddr_in  peer_addr;
     int                 req_count;
     int                 pkt_count;
+    int                 activeQ_len;
 
     PJREQ               activeQ;
     PJREQ               completeQ;
@@ -306,7 +307,6 @@ int             jrdp_init(void);
 
 PJREQ           jrdp_get_nxt_blocking( int sock );
 PJREQ           jrdp_get_nxt_nonblocking( int sock );
-int             jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait );
 int             jrdp_accept( PJLISTENER lstner, int timeout_sec, int timeout_usec );
 int             jrdp_headers( PJREQ req );
 int             jrdp_xmit( PJSENDER snder, PJREQ req, int window );
@@ -334,7 +334,7 @@ struct timeval  jrdp__addtime( struct timeval t1, struct timeval t2 );
 struct timeval  jrdp__subtime( const struct timeval minuend, const struct timeval subtrahend );
 struct timeval  jrdp__mintime( const struct timeval t1, const struct timeval t2 );
 void            jrdp__adjust_backoff( struct timeval* tv );
-struct timeval  jrdp__next_activeQ_timeout( const struct timeval now );
+struct timeval  jrdp__next_activeQ_timeout( PJSENDER snder, const struct timeval now );
 
 extern int      jrdp_priority;
 

@@ -24,14 +24,14 @@ struct sockaddr_in jrdp_client_address_port;
 
 PJLISTENER  rudp_lstnerQ = NULL;
 PJSENDER    rudp_snderQ =NULL;
-PJREQ jrdp_activeQ = NULL;
-PJREQ jrdp_completeQ = NULL;
+//PJREQ jrdp_activeQ = NULL;
+//PJREQ jrdp_completeQ = NULL;
 //PJREQ jrdp_pendingQ = NULL;
 //PJREQ jrdp_partialQ = NULL;
 //PJREQ jrdp_runQ = NULL;
 //PJREQ jrdp_doneQ = NULL;
 
-int jrdp_activeQ_len = 0;
+//int jrdp_activeQ_len = 0;
 //int jrdp_pendingQ_len = 0;
 //int jrdp_partialQ_len = 0;
 //int jrdp_partialQ_max_len = 20;
@@ -591,99 +591,6 @@ jrdp_headers( PJREQ req )
     }
 
     return 0;
-}
-
-int
-jrdp_send( PJREQ req, const char* dname, struct sockaddr_in* dest, int ttwait )
-{
-    PJPACKET ptmp;
-
-    if ( dname )
-    {
-        int dname_sz = strlen(dname);
-
-        if ( req->peer_hostname == NULL || strlen(req->peer_hostname) < dname_sz )
-        {
-            free(req->peer_hostname);
-            req->peer_hostname = (char*)malloc( sizeof(char)*dname_sz + 1 );
-        }
-        strcpy( req->peer_hostname, dname );
-    }
-
-    if ( jrdp_sock < 0 )
-    {
-        if ( jrdp_init() )
-        {
-            printf( "jrdp_send init failed.\n" );
-            exit(-1);
-        }
-    }
-
-    if ( req->status == JRDP_STATUS_FREE )
-    {
-        printf( "Attempt to send free request.\n" );
-        exit(-1);
-    }
-
-    while ( req->outpkt )
-    {
-        req->outpkt->seq = ++(req->trns_tot);
-        ptmp = req->outpkt;
-        EXTRACT_ITEM( ptmp, req->outpkt );
-        APPEND_ITEM( ptmp, req->trns );
-    }
-
-    /* Assign connection ID */
-    req->cid = global_cid++; // jrdp_next_cid();
-
-    if ( !dest || ( dest->sin_addr.s_addr == 0 ) )
-    {
-        if ( dname == NULL || *dname == '\0' )
-        {
-            printf( "No peer for sender.\n" );
-            exit(-1);
-        }
-
-        if ( jrdp_hostname2name_addr( dname, NULL, &(req->peer) ) )
-        {
-            printf( "Bad host name.\n" );
-            exit(-1);
-        }
-    }
-    else
-        memcpy( &(req->peer), dest, sizeof(struct sockaddr_in) );
-
-    if ( req->peer.sin_port == 0 )
-    {
-        printf( "No port to use.\n" );
-        exit(-1);
-    }
-
-    if ( dest && dest->sin_addr.s_addr == 0 )
-        memcpy( dest, &(req->peer), sizeof(struct sockaddr_in) );
-
-    if ( jrdp_headers(req) )
-    {
-        printf( "Add packet head failed.\n" );
-        exit(-1);
-    }
-    req->status = JRDP_STATUS_ACTIVE;
-
-    //EXTERN_MUTEXED_LOCK(jrdp_activeQ);
-    APPEND_ITEM( req, jrdp_activeQ );
-    ++jrdp_activeQ_len;
-    req->wait_till = jrdp__addtime( jrdp__gettimeofday(), req->timeout_adj );
-    if ( jrdp_xmit( NULL, req, req->pwindow_sz ) )
-    {
-        printf( "Xmit packets failed.\n" );
-        exit(-1);
-    }
-    //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
-
-    if ( ttwait )
-        return jrdp_retrieve( NULL, req, ttwait );
-    else
-        return JRDP_PENDING;
 }
 
 int
@@ -1481,16 +1388,16 @@ jrdp__adjust_backoff( struct timeval* tv )
 }
 
 struct timeval
-jrdp__next_activeQ_timeout( const struct timeval now )
+jrdp__next_activeQ_timeout( PJSENDER snder, const struct timeval now )
 {
     PJREQ req;
     struct timeval soonest;
 
     soonest = infinitetime;
-    //EXTERN_MUTEXED_LOCK(jrdp_activeQ);
-    for ( req = jrdp_activeQ; req; req = req->next )
+    //EXTERN_MUTEXED_LOCK(snder->activeQ);
+    for ( req = snder->activeQ; req; req = req->next )
         soonest = jrdp__mintime( soonest, req->wait_till );
-    //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+    //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
     return jrdp__subtime( soonest, now );
 }
 
@@ -1642,8 +1549,8 @@ check_for_pending:
     /* If select_retval is zero, then nothing to process, check for timeouts */
     if ( select_retval == 0 )
     {
-        //EXTERN_MUTEXED_LOCK(jrdp_activeQ);
-        req = jrdp_activeQ;
+        //EXTERN_MUTEXED_LOCK(snder->activeQ);
+        req = snder->activeQ;
         while ( req )
         {
             if ( req->status == JRDP_STATUS_ACKPEND )
@@ -1671,16 +1578,16 @@ check_for_pending:
                 {
                     printf( "Connection %d timed out - Retry count exceeded.\n", ntohs(req->cid) );
                     req->status = JRDP_TIMEOUT;
-                    EXTRACT_ITEM( req, jrdp_activeQ );
-                    --jrdp_activeQ_len;
-                    //EXTERN_MUTEXED_LOCK(jrdp_completeQ);
-                    APPEND_ITEM( req, jrdp_completeQ );
-                    //EXTERN_MUTEXED_UNLOCK(jrdp_completeQ);
+                    EXTRACT_ITEM( req, snder->activeQ );
+                    --snder->activeQ_len;
+                    //EXTERN_MUTEXED_LOCK(snder->completeQ);
+                    APPEND_ITEM( req, snder->completeQ );
+                    //EXTERN_MUTEXED_UNLOCK(snder->completeQ);
                 }
             }
             req = req->next;
         }
-        //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+        //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
         return JRDP_SUCCESS;
     }
 
@@ -1732,8 +1639,8 @@ check_for_pending:
     }
 
     /* Match up response with request */
-    //EXTERN_MUTEXED_LOCK(jrdp_activeQ);
-    for ( req = jrdp_activeQ; req; req = req->next )
+    //EXTERN_MUTEXED_LOCK(snder->activeQ);
+    for ( req = snder->activeQ; req; req = req->next )
     {
         if ( cid == req->cid )
             break;
@@ -1743,7 +1650,7 @@ check_for_pending:
     {
         printf( "Packet received for inactive request (cid %d)\n", ntohs(cid) );
         jrdp_pktfree(pkt);
-        //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+        //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
         goto check_for_pending;
     }
 
@@ -1837,12 +1744,12 @@ check_for_pending:
         case 1: /* JRDP connection refused */
             printf( "  ***JRDP connection refused by server***\n" );
             req->status = JRDP_REFUSED;
-            EXTRACT_ITEM( req, jrdp_activeQ );
-            --jrdp_activeQ_len;
-            //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
-            //EXTERN_MUTEXED_LOCK(jrdp_completeQ);
-            APPEND_ITEM( req, jrdp_completeQ );
-            //EXTERN_MUTEXED_UNLOCK(jrdp_completeQ);
+            EXTRACT_ITEM( req, snder->activeQ );
+            --snder->activeQ_len;
+            //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
+            //EXTERN_MUTEXED_LOCK(snder->completeQ);
+            APPEND_ITEM( req, snder->completeQ );
+            //EXTERN_MUTEXED_UNLOCK(snder->completeQ);
             goto check_for_pending;
             break;
         case 2: /* reset peer's received-through count */
@@ -1940,7 +1847,7 @@ check_for_pending:
             jrdp_retransmit_unacked_packets( snder, req );
             retransmit_unacked_packets = 0;
         }
-        //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+        //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
         jrdp_pktfree(pkt);
         goto check_for_pending;
     }
@@ -2050,7 +1957,7 @@ ins_done:
     /* If incomplete, wait for more */
     if ( !(req->comp_thru) || ( req->comp_thru->seq != req->rcvd_tot ) )
     {
-        //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+        //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
         goto check_for_pending;
     }
 
@@ -2069,13 +1976,13 @@ req_complete:
 
     req->status = JRDP_STATUS_COMPLETE;
     req->inpkt = req->rcvd;
-    EXTRACT_ITEM( req, jrdp_activeQ );
-    --jrdp_activeQ_len;
-    //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+    EXTRACT_ITEM( req, snder->activeQ );
+    --snder->activeQ_len;
+    //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
     /* A complete response has been received */
-    //EXTERN_MUTEXED_LOCK(jrdp_completeQ);
-    APPEND_ITEM( req, jrdp_completeQ );
-    //EXTERN_MUTEXED_UNLOCK(jrdp_completeQ);
+    //EXTERN_MUTEXED_LOCK(snder->completeQ);
+    APPEND_ITEM( req, snder->completeQ );
+    //EXTERN_MUTEXED_UNLOCK(snder->completeQ);
     return JRDP_SUCCESS;
 }
 
@@ -2100,7 +2007,7 @@ jrdp_retrieve( PJSENDER snder, PJREQ req, int ttwait_arg )
     }
     start_time = jrdp__gettimeofday();
 
-    if ( !req && !jrdp_activeQ && !jrdp_completeQ )
+    if ( !req && !snder->activeQ && !snder->completeQ )
     {
         printf( "Bad request.\n" );
         exit(-1);
@@ -2122,16 +2029,16 @@ jrdp_retrieve( PJSENDER snder, PJREQ req, int ttwait_arg )
 
     jrdp_process_active(snder);
 
-    if ( !req && jrdp_completeQ )
+    if ( !req && snder->completeQ )
       return 999;//PSUCCESS;
     if ( !req )
       goto restart_select;
 
     if ( ( req->status == JRDP_STATUS_COMPLETE) || ( req->status > 0 ) )
     {
-        //EXTERN_MUTEXED_LOCK(jrdp_completeQ);
-        EXTRACT_ITEM( req, jrdp_completeQ );
-        //EXTERN_MUTEXED_UNLOCK(jrdp_completeQ);
+        //EXTERN_MUTEXED_LOCK(snder->completeQ);
+        EXTRACT_ITEM( req, snder->completeQ );
+        //EXTERN_MUTEXED_UNLOCK(snder->completeQ);
 
         PJPACKET ptmp;
         if ( req->status > 0 )
@@ -2157,14 +2064,14 @@ restart_select:
     if ( jrdp__eqtime( ttwait, zerotime ) )
         return JRDP_PENDING;
     else if ( jrdp__eqtime( ttwait, infinitetime ) )
-        selwait_st = jrdp__next_activeQ_timeout(cur_time);
+        selwait_st = jrdp__next_activeQ_timeout( snder, cur_time );
     else
     {
         assert( !jrdp__eqtime( ttwait, infinitetime ) && !jrdp__eqtime( ttwait, zerotime ) );
         time_elapsed = jrdp__subtime( cur_time, start_time );
         if ( jrdp__timeislater( time_elapsed, ttwait ) )
             return JRDP_PENDING;
-        selwait_st = jrdp__mintime( jrdp__next_activeQ_timeout(cur_time), jrdp__subtime( ttwait, time_elapsed ) );
+        selwait_st = jrdp__mintime( jrdp__next_activeQ_timeout( snder, cur_time ), jrdp__subtime( ttwait, time_elapsed ) );
     }
 
     printf( "Waiting %ld.%06ld seconds for reply...", selwait_st.tv_sec, selwait_st.tv_usec );
@@ -2429,6 +2336,12 @@ rudp_connect( const char* dname, struct sockaddr_in* dest )
     else
         memcpy( &snder->peer_addr, dest, sizeof(struct sockaddr_in) );
 
+    if ( snder->peer_addr.sin_port == 0 )
+    {
+        printf( "No port to use.\n" );
+        exit(-1);
+    }
+
     if ( connect( snder->sock, (struct sockaddr*)&snder->peer_addr, sizeof(struct sockaddr_in) ) )
     {
         printf( "JRDP: connect() completed with error.\n" );
@@ -2469,7 +2382,6 @@ rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait )
         exit(-1);
     }
 
-
     PJPACKET ptmp;
 
     memcpy( &(req->peer), &snder->peer_addr, sizeof(struct sockaddr_in) );
@@ -2491,12 +2403,6 @@ rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait )
     /* Assign connection ID */
     req->cid = global_cid++; // jrdp_next_cid();
 
-    if ( req->peer.sin_port == 0 )
-    {
-        printf( "No port to use.\n" );
-        exit(-1);
-    }
-
     if ( jrdp_headers(req) )
     {
         printf( "Add packet head failed.\n" );
@@ -2504,16 +2410,16 @@ rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait )
     }
     req->status = JRDP_STATUS_ACTIVE;
 
-    //EXTERN_MUTEXED_LOCK(jrdp_activeQ);
-    APPEND_ITEM( req, jrdp_activeQ );
-    ++jrdp_activeQ_len;
+    //EXTERN_MUTEXED_LOCK(snder->activeQ);
+    APPEND_ITEM( req, snder->activeQ );
+    ++snder->activeQ_len;
     req->wait_till = jrdp__addtime( jrdp__gettimeofday(), req->timeout_adj );
     if ( jrdp_xmit( snder, req, req->pwindow_sz ) )
     {
         printf( "Xmit packets failed.\n" );
         exit(-1);
     }
-    //EXTERN_MUTEXED_UNLOCK(jrdp_activeQ);
+    //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
 
     if ( ttwait )
         return jrdp_retrieve( snder, req, ttwait );
@@ -2638,6 +2544,7 @@ rudp_snderalloc(void)
 
     snder->req_count = 0;
     snder->pkt_count = 0;
+    snder->activeQ_len = 0;
 
     snder->activeQ = NULL;
     snder->completeQ = NULL;

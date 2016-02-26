@@ -195,6 +195,7 @@ enum jrdp_status
     JRDP_STATUS_GAPS = -5,
     JRDP_STATUS_ABORTED = -6,
     JRDP_STATUS_FREE = -7, /* used for consistency checking; indicates this request is free. */
+    JRDP_STATUS_DELIVERED = -8,
     JRDP_STATUS_FAILED = 255
 };
 
@@ -320,6 +321,7 @@ int             jrdp_reply( int sock, PJREQ req, int flags, const char* message,
 int             jrdp_respond( PJLISTENER lstner, PJREQ req, int flags );
 void            jrdp_update_cfields( PJREQ existing, PJREQ newing );
 
+int             rudp_receive( int srvsock, char** buf, int* len, struct sockaddr* from );
 int             rudp_open_listen( u_int16_t port );
 int             rudp_connect( const char* dname, struct sockaddr_in* dest );
 int             rudp_send( int sock, int flags, const char* buf, int buflen, int ttwait );

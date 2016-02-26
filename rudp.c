@@ -939,6 +939,11 @@ jrdp_accept( PJLISTENER lstner, int timeout_sec, int timeout_usec )
                 {
                     if ( areq == treq )
                         areq = NULL;
+
+                    // Added by chenyu.
+                    if ( ack_bit_set )
+                        jrdp_acknowledge( lstner, treq );
+
                     creq = treq;
                     EXTRACT_ITEM( creq, lstner->partialQ );
                     --lstner->partialQ_len;
@@ -1563,7 +1568,13 @@ check_for_pending:
                 now = jrdp__gettimeofday();
             if ( req->wait_till.tv_sec && jrdp__timeislater( now, req->wait_till ) )
             {
-                if ( req->retries_rem-- > 0 )
+                // Added by chenyu.
+                if ( req->status == JRDP_STATUS_DELIVERED )
+                {
+                    jrdp__adjust_backoff( &(req->timeout_adj) );
+                    req->wait_till = jrdp__addtime( req->timeout_adj, now );
+                }
+                else if ( req->retries_rem-- > 0 )
                 {
                     jrdp__adjust_backoff( &(req->timeout_adj) );
                     if ( req->pwindow_sz > 4 )
@@ -1848,6 +1859,11 @@ check_for_pending:
             jrdp_retransmit_unacked_packets( snder, req );
             retransmit_unacked_packets = 0;
         }
+
+        // Added by chenyu.
+        if ( req->prcvd_thru == req->trns_tot )
+            req->status = JRDP_STATUS_DELIVERED;
+
         //EXTERN_MUTEXED_UNLOCK(snder->activeQ);
         jrdp_pktfree(pkt);
         goto check_for_pending;
@@ -2601,4 +2617,28 @@ rudp_nxt_cid( PJSENDER snder )
         ++next_conn_id;
 
     return (htons(next_conn_id));
+}
+
+int
+rudp_receive( int srvsock, char** buf, int* len, struct sockaddr* from )
+{
+    PJREQ nxtreq = jrdp_get_nxt_nonblocking(srvsock);
+
+    if ( nxtreq )
+    {
+        memcpy( from, &(nxtreq->peer), sizeof(struct sockaddr_in) );
+
+        PJPACKET pkt;
+        for ( pkt = nxtreq->rcvd; pkt; pkt = pkt->next )
+            *len += pkt->length - ( pkt->text - pkt->start );
+
+        *buf = (char*)malloc( sizeof(char) * (*len) + 1 );
+        memset( (*buf), '\000', (*len) + 1 );
+        for ( pkt = nxtreq->rcvd; pkt; pkt = pkt->next )
+            strcat( (*buf), pkt->text );
+
+        return nxtreq->cid;
+    }
+    else
+        return -1;
 }
